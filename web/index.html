@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cozy Hollow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="login" class="screen">
+  <div class="card">
+    <h1>Cozy Hollow</h1>
+    <p class="sub">a little farm you tend together</p>
+    <label>Farmer name <input id="name" maxlength="12" placeholder="e.g. Yutong" autocomplete="off"></label>
+    <div class="row">
+      <div class="pick" data-sprite="girl"><canvas class="preview" width="64" height="96"></canvas><span>Farm girl</span></div>
+      <div class="pick" data-sprite="boy"><canvas class="preview" width="64" height="96"></canvas><span>Farm boy</span></div>
+    </div>
+    <div id="swatches" class="row"></div>
+    <button id="play">Go to the farm</button>
+    <p class="hint">A friend can join from a browser at this same address, or from the terminal with <code>python3 farm.py</code>.</p>
+  </div>
+</div>
+
+<div id="game" class="screen hidden">
+  <canvas id="map" tabindex="0"></canvas>
+  <div id="topbar">
+    <span id="farm-name">Cozy Hollow</span>
+    <span id="season"></span>
+    <span id="clock"></span>
+    <span id="weather"></span>
+    <span id="coins"></span>
+    <span id="can-top"></span>
+    <span id="online"></span>
+  </div>
+  <div id="toolbar"><div class="slots"></div><div id="xpbar" title="farming experience"><div class="fill"></div><span class="label"></span></div></div>
+  <div id="side">
+    <div class="panel" id="farmers"><h3>Farmers</h3><ul></ul></div>
+    <div class="panel" id="quest"><h3>Notice board</h3><p></p></div>
+    <div class="panel" id="log"><h3>Log</h3><ul></ul></div>
+  </div>
+  <div id="here"></div>
+  <div id="toast" class="hidden"></div>
+  <div id="chatbox" class="hidden"><span>say&gt;</span><input id="chat" maxlength="160" autocomplete="off"></div>
+  <div id="hint">WASD move · E use tool · 1-9 pick tool · T chat · I bag · J journal · H help · M music</div>
+  <div id="menu" class="hidden"><div class="box"><button class="xbtn" title="close">×</button><h2></h2><div class="body"></div><div class="foot"></div></div></div>
+</div>
+<script src="art-core.js"></script>
+<script src="art-ground.js"></script>
+<script src="art-props.js"></script>
+<script src="art-plants.js"></script>
+<script src="art-buildings.js"></script>
+<script src="art-farmers.js"></script>
+<script src="art-interior.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+#!/bin/sh
+# Say "hi" on every terminal logged in as this account (see pingall.py).
+exec python3 "$(dirname "$0")/pingall.py" "$@"
