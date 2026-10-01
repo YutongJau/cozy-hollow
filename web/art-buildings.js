@@ -661,4 +661,8 @@ function chimneySprite() {
 }
 
 Object.assign(window.ART, { HOUSE, roofTile, wallTile, doorTile, porchTile, chimneySprite, BUILD, OV, TOPPAD, roofRowsFor, buildingSprite });
+// the building kit, so the valley's other buildings are made of the very same boards, shingles and windows
+window.ART.BH = { stones, logWall, logEnds, clapboard, boardWall, eaveShadow, roofFace, roofEdges, eaveBoard, ridgeCap, glass, frameWindow, sill,
+  shutter, flowerBox, panelDoor, deckBoards, disc, roundBale, wagonWheel, sack, logStack, doorHood, lantern, plaque, stoneChimney, stovePipe,
+  gableDormer, weatherVane, cupola, veg, crate, pottedPlant, chalkboard, rainBarrel, scallopAwning, mixc, shadec, STONE, GLASS, IRON, FLOWERS, LEAF };
 })();

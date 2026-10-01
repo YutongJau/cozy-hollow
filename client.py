@@ -11,6 +11,7 @@ import threading
 import time
 
 import world as W
+import areas as AR
 import pingall
 
 STAGE_GLYPHS = [(".", "."), (",", ","), ("v", "v"), ("Y", "Y")]
@@ -30,6 +31,24 @@ PROP_STYLE = {  # (256-colour fg, 8-colour fg, bold)
     "s": (137, "yellow", False), "p": (173, "yellow", False), "g": (223, "white", True),
 }
 SOIL_GLYPH = ("▒", "=")
+# the valley beyond the farm: glyph (unicode, ascii), 256-colour fg and bg (None: the area's ground), 8-colour fg, bold
+AREA_GLYPHS = {
+    ":": ("\u2591", ":", 180, 137, "yellow", False), ",": ("\u00b7", ".", 229, 180, "yellow", False),
+    "=": ("\u2592", "=", 250, 245, "white", False), "H": ("\u2550", "=", 223, 94, "yellow", True),
+    "r": ("\u00b7", ".", 250, 243, "white", False), "v": ("\u00b7", ".", 242, 236, "white", False),
+    "z": ("\u00b7", ".", 223, 173, "yellow", False),
+    "P": ("\u25b2", "^", 22, None, "green", True), "A": ("\u00a5", "Y", 40, None, "green", True), "K": ("\u03a8", "K", 34, None, "green", True),
+    "C": ("\u2593", "#", 245, 240, "white", False), "R": ("\u2588", "#", 238, 235, "white", False),
+    "F": ("\u25ce", "O", 45, 245, "cyan", True), "E": ("\u2229", "n", 252, None, "white", True), "L": ("=", "=", 137, None, "yellow", False),
+    "V": ("\u2584", "v", 137, 25, "yellow", True), "Q": ("\u2584", "Q", 196, None, "red", True), "U": ("H", "H", 220, 236, "yellow", True),
+    "D": ("\u25bc", "v", 220, 233, "yellow", True), "I": ("\u2248", "~", 45, 94, "cyan", True), "J": ("\u25a0", "J", 203, None, "red", True),
+    "O": ("o", "o", 137, None, "yellow", True),
+}
+BUILDING_C256 = {"store": 71, "saloon": 130, "hall": 124, "museum": 250, "clinic": 255, "smith": 243, "bakery": 218, "post": 74,
+                 "carpenter": 179, "cottage": 222, "cottage2": 158, "cottage3": 183, "fishshop": 109, "lighthouse": 196, "cabin": 137,
+                 "guild": 245, "mine": 236, "volcano": 59, "tiki": 179, "assay": 180, "wsaloon": 131, "bank": 252, "sheriff": 137, "stable": 130}
+ORE_C256 = {"stone": 250, "copper_ore": 173, "iron_ore": 255, "gold_ore": 220, "quartz": 231, "amethyst": 135, "emerald": 42,
+            "ruby": 196, "diamond": 159, "prismatic_shard": 213}
 LABELS = [(4, 4, "FARMHOUSE", "white"), (49, 3, "SEED SHOP", "magenta"), (76, 6, " BARN ", "white")]
 FG = {
     "green": curses.COLOR_GREEN, "yellow": curses.COLOR_YELLOW, "blue": curses.COLOR_BLUE,
@@ -1051,7 +1070,8 @@ class Client:
                       "r": ("\u2592", "r", "red", 160), "x": ("\u2564", "x", "yellow", 179), "b": ("\u2588", "b", "red", 203),
                       "t": ("\u2550", "t", "yellow", 179), "c": ("\u25a0", "c", "yellow", 214), "f": ("\u2593", "f", "red", 208),
                       "F": ("\u2593", "F", "yellow", 220), "k": ("\u2261", "k", "magenta", 135), "p": ("\u2663", "p", "green", 34),
-                      "S": ("\u2550", "S", "yellow", 179), "q": ("@", "@", "green", 82), "h": ("\u2261", "h", "yellow", 220), "o": ("\u2550", "o", "yellow", 137)}
+                      "S": ("\u2550", "S", "yellow", 179), "q": ("@", "@", "green", 82), "h": ("\u2261", "h", "yellow", 220), "o": ("\u2550", "o", "yellow", 137),
+                      "n": ("@", "@", "cyan", 51), "d": ("\u25d8", "d", "cyan", 117), "a": ("\u03a0", "a", "white", 250), "i": ("\u25d9", "i", "yellow", 137)}
 
     def draw_interior(self, y0, x0, vh, vw, loc):
         rows = W.INTERIORS.get(loc, [])
@@ -1085,11 +1105,113 @@ class Client:
                 text = " %s " % label
                 attr = P(W.PLAYER_COLORS[p["color"] % len(W.PLAYER_COLORS)]) | curses.A_BOLD
                 self.put(sy - 2, max(ox, sx - len(text) // 2), text, (attr | curses.A_REVERSE) if p.get("bubble") else attr | curses.A_DIM)
-        self.put(oy + h + 1, ox, ("Inside the %s - walk onto the doorway to go out." % loc)[:vw], curses.A_DIM)
+        where = ("%s's %s" % (AR.KEEPERS[loc], {"wsaloon": "saloon", "assay": "general store", "hall": "town hall", "store": "mercantile",
+                                                  "post": "post office", "smith": "smithy", "fishshop": "fish shop", "cabin": "cabin"}.get(loc, loc))) if loc in AR.KEEPERS else "the " + loc
+        self.put(oy + h + 1, ox, ("Inside %s - walk onto the doorway to go out." % where)[:vw], curses.A_DIM)
+
+    def area_ground_bg(self, loc, night):
+        if not self.pal.c256:
+            return -1
+        idx = {"frontier": 173, "mine1": 236, "mine2": 236, "mine3": 236}.get(loc) or THEME["summer" if loc == "island" else self.state["season"]]["grass"]
+        return NIGHT_BG.get(idx, idx) if night else idx
+
+    def draw_area(self, y0, x0, vh, vw, loc):
+        """The valley's other places: the same idea as the farm map, glyph by glyph, plus buildings with their names."""
+        st, me = self.state, self.my_player()
+        rows, P, rich, B = AR.MAPS[loc], self.pal.pair, self.pal.c256, curses.A_BOLD
+        mw, mh = len(rows[0]), len(rows)
+        px, py = (me["x"], me["y"]) if me else (mw // 2, mh // 2)
+        cam_x, ox, vw_eff = (0, x0 + (vw - mw) // 2, mw) if mw <= vw else (max(0, min(mw - vw, px - vw // 2)), x0, vw)
+        cam_y, oy, vh_eff = (0, y0 + (vh - mh) // 2, mh) if mh <= vh else (max(0, min(mh - vh, py - vh // 2)), y0, vh)
+        cave = loc.startswith("mine")
+        night = self.is_night() or cave
+        gbg = self.area_ground_bg(loc, night and not cave)
+        th = THEME["summer" if loc == "island" else st["season"]]
+        tiles = (st.get("areas") or {}).get(loc, {})
+        wframe = self.frame % 3
+        bcol = {}
+        for b in AR.BUILDINGS[loc]:
+            for yy in range(b["y"], b["y"] + b["h"]):
+                for xx in range(b["x"], b["x"] + b["w"]):
+                    bcol[(xx, yy)] = b
+        fx, fy = (me["x"] + me["facing"][0], me["y"] + me["facing"][1]) if me else (-1, -1)
+        for sy in range(vh_eff):
+            y = cam_y + sy
+            for sx in range(vw_eff):
+                x = cam_x + sx
+                ch = rows[y][x]
+                hsh = (x * 73856093 ^ y * 19349663) & 0xFFFF
+                d = tiles.get("%d,%d" % (x, y))
+                if d and d.get("o"):
+                    gl, attr = self.g(("\u25cf", "o")), (P(ORE_C256.get(d["o"], 250), gbg) if rich else P("white")) | B
+                elif d and d.get("g"):
+                    f = W.FORAGE[d["g"]]
+                    gl, attr = self.g((f["glyph"], f["ascii"])), (P(ITEM_C256.get(d["g"], C256.get(f["color"], 255)), gbg) if rich else P(f["color"])) | B
+                elif ch == "@":
+                    b = bcol.get((x, y))
+                    door = b and (x, y) == tuple(b["door"])
+                    gl = self.g(("\u2580", "+")) if door else self.g(("\u2593", "#"))
+                    c = BUILDING_C256.get(b["kind"], 250) if b else 250
+                    attr = (P(220 if door else c, 94 if door else 236) if rich else P("yellow" if door else "white")) | (B if door else 0)
+                elif ch == "~":
+                    gl = self.g(("\u2248", "~")) if (x + y + wframe) % 3 else self.g(("~", "-"))
+                    attr = P(T256["water_fg"][(x * 3 + y + wframe) % 3], T256["water"]) if rich else P("blue", self.pal.water_bg)
+                elif ch == ".":
+                    gl = "," if hsh % 7 == 0 else ("'" if hsh % 11 == 0 else ".")
+                    attr = P(th["grass_fg"][hsh % 3], gbg) if rich else P("green")
+                elif ch in AREA_GLYPHS:
+                    u, a, c256, b256, c8, bold = AREA_GLYPHS[ch]
+                    gl = a if self.ascii else u
+                    if ch in "CR" and loc == "frontier":
+                        c256, b256 = 209, 131
+                    attr = (P(c256, b256 if b256 is not None else gbg) if rich else P(c8)) | (B if bold else 0)
+                elif ch in TERRAIN_GLYPHS:
+                    gl = self.g(TERRAIN_GLYPHS[ch])
+                    if ch == "T":
+                        attr = P(th["tree"][hsh % 2], gbg) | B if rich else P("green") | B
+                    elif ch == "f":
+                        attr = (P(th["flower"][hsh % 3], gbg) if rich else P("magenta")) | B
+                    elif ch in PROP_STYLE:
+                        c256, c8, bold = PROP_STYLE[ch]
+                        attr = (P(c256, gbg) if rich else P(c8)) | (B if bold else 0)
+                    elif ch == "u":
+                        attr = (P(34, gbg) if rich else P("green")) | curses.A_DIM
+                    else:
+                        attr = P(250, gbg) if rich else P("white")
+                else:
+                    gl, attr = ch, 0
+                if (x, y) == (fx, fy) and (d or ch in "~!wIEFJLOgVQUDBchbl" or (ch == "@" and (loc, x, y) in W.PORTALS)):
+                    attr = (attr & ~curses.A_DIM) | curses.A_REVERSE
+                if cave and abs(x - px) + abs(y - py) > 9:
+                    attr |= curses.A_DIM
+                self.put(oy + sy, ox + sx, gl, attr)
+        for b in AR.BUILDINGS[loc]:
+            label = b["label"] or (b.get("keeper") and "%s's" % b["keeper"]) or ""
+            ly = b["y"] + b["h"] // 2 - cam_y
+            lx = b["x"] + max(0, (b["w"] - len(label)) // 2) - cam_x
+            if label and 0 <= ly < vh_eff:
+                for i, chh in enumerate(label[:b["w"]]):
+                    if 0 <= lx + i < vw_eff:
+                        self.put(oy + ly, ox + lx + i, chh, (P(T256["label_fg"], 236) if rich else P("white")) | B)
+        self._indoor_bg = gbg
+        for p in sorted(st["players"], key=lambda p: p["name"] == self.name):
+            if not p["online"] or p.get("loc", "farm") != loc or not (cam_x <= p["x"] < cam_x + vw_eff and cam_y <= p["y"] < cam_y + vh_eff):
+                continue
+            sx, sy = ox + p["x"] - cam_x, oy + p["y"] - cam_y
+            self.draw_sprite(p, sy, sx, night, oy, ox, ox + vw_eff)
+            label = p.get("bubble") or (p["name"] if p["name"] != self.name else None)
+            if label:
+                text = " %s " % label
+                lx = max(ox, min(ox + vw_eff - len(text), sx - len(text) // 2))
+                attr = self.pal.pair(W.PLAYER_COLORS[p["color"] % len(W.PLAYER_COLORS)]) | B
+                self.put(sy - 2 if sy - 2 >= oy else sy + 1, lx, text, (attr | curses.A_REVERSE) if p.get("bubble") else attr | curses.A_DIM)
+        self._indoor_bg = None
 
     def draw_map(self, y0, x0, vh, vw):
         st = self.state
         me = self.my_player()
+        if me and me.get("loc", "farm") in AR.MAPS:
+            return self.draw_area(y0, x0, vh, vw, me["loc"])
         if me and me.get("loc", "farm") != "farm":
             return self.draw_interior(y0, x0, vh, vw, me["loc"])
         px, py = (me["x"], me["y"]) if me else W.SPAWN
@@ -1303,6 +1425,16 @@ class Client:
         p = self.my_player()
         if not p:
             return "", ""
+        if p.get("loc", "farm") in AR.MAPS:
+            return self.describe_area(p)
+        if p.get("loc", "farm") in AR.KEEPERS:
+            rows = W.INTERIORS[p["loc"]]
+            fx, fy = p["x"] + p["facing"][0], p["y"] + p["facing"][1]
+            ch = rows[fy][fx] if 0 <= fy < len(rows) and 0 <= fx < len(rows[0]) else "#"
+            keeper = AR.KEEPERS[p["loc"]]
+            what = ("%s - E to talk%s" % (keeper, " and shop" if p["loc"] == "store" else "")) if ch in "nS" else \
+                "The doorway - walk onto it to go out" if ch == "x" else W.INTERIOR_NAMES.get(ch, "wall").capitalize()
+            return "Inside %s's place" % keeper, what
         if p.get("loc", "farm") != "farm":
             rows = W.INTERIORS[p["loc"]]
             fx, fy = p["x"] + p["facing"][0], p["y"] + p["facing"][1]
@@ -1391,6 +1523,43 @@ class Client:
             return "Carrying the storage chest over your head.", (   # the same checks, in the same order, as act_place
                 "Not there - folks need that spot clear to get by." if (fx, fy) in W.NO_CHEST
                 else "E (or X) sets it down on the tile ahead." if self.chest_ok(fx, fy) else "No room to set it down - find clear ground.")
+        return here, ahead
+
+    def describe_area(self, p):
+        loc, rows = p["loc"], AR.MAPS[p["loc"]]
+        tiles = (self.state.get("areas") or {}).get(loc, {})
+        sel = self.me["inventory"][self.me["selected"]][0] if self.me and self.me["inventory"] else None
+        name = lambda c: (AR.TERRAIN_NAMES.get(c) or W.TERRAIN_NAMES.get(c, "")).capitalize()
+        here = "%s - %s" % (AR.AREA_NAMES[loc][0].upper() + AR.AREA_NAMES[loc][1:], name(rows[p["y"]][p["x"]]))
+        fx, fy = p["x"] + p["facing"][0], p["y"] + p["facing"][1]
+        ft = rows[fy][fx] if 0 <= fy < len(rows) and 0 <= fx < len(rows[0]) else "#"
+        fd, hd = tiles.get("%d,%d" % (fx, fy), {}), tiles.get("%d,%d" % (p["x"], p["y"]), {})
+        portal = (loc, fx, fy) in W.PORTALS
+        if fd.get("g") or hd.get("g"):
+            ahead = "%s - E to pick." % W.ITEMS[fd.get("g") or hd.get("g")]["name"]
+        elif fd.get("o"):
+            ahead = ("A rock" if fd["o"] == "stone" else "Rock with " + W.ITEMS[fd["o"]]["name"]) + (" - E to break it." if sel == "pickaxe" else " - hold the pickaxe (5), press E.")
+        elif portal and ft == "@":
+            b = next((b for b in AR.BUILDINGS[loc] if tuple(b["door"]) == (fx, fy)), None)
+            ahead = "%s - walk in." % (b["label"].title() if b and b["label"] else "A door")
+        elif ft in "UD":
+            ahead = "Ladder %s - walk onto it." % ("up" if ft == "U" else "down")
+        elif portal:
+            ahead = "The path goes on - keep walking."
+        elif ft == "~":
+            ahead = "Water - E refills the can, F fishes."
+        elif ft == "V":
+            ahead = "The boat - E to sail."
+        elif ft == "Q":
+            ahead = "The stagecoach - E to ride."
+        elif ft == "!":
+            ahead = "Notice board - E to read the request."
+        elif ft == "@":
+            ahead = "A building. The door is at the front."
+        elif ft in "FELJOgbBchlmKCTPAswI":
+            ahead = name(ft) + " - E to have a look."
+        else:
+            ahead = ""
         return here, ahead
 
     def draw_bottom(self, h, w):

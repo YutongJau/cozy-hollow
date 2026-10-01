@@ -33,6 +33,9 @@ DEFAULT_SAVE = os.path.join(DEFAULT_DIR, "world.json")
 DEFAULT_PORT = 7734
 DEFAULT_WEB_PORT = 7735
 WEB_DIR = os.path.join(HERE, "web")
+# changes whenever the game files change, so open browser tabs know to reload after an update
+BUILD = str(int(max([os.path.getmtime(os.path.join(WEB_DIR, f)) for f in os.listdir(WEB_DIR)] +
+                    [os.path.getmtime(os.path.join(HERE, f)) for f in ("world.py", "areas.py")])))
 SAVE_EVERY = 20.0
 TTY_PING_EVERY = (30.0, 5.0)   # min seconds between terminal pings: per player, and from anyone
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -189,7 +192,7 @@ class FarmServer:
             self.clients[name] = conn
             log("join", name, conn.kind, conn.peer)
             out = self.world.join(name, time.time(), hello.get("sprite"), hello.get("color"), hello.get("hat"))
-            conn.send(dict(t="welcome", name=name, farm=self.world.name, log=self.world.log[-40:],
+            conn.send(dict(t="welcome", name=name, farm=self.world.name, log=self.world.log[-40:], build=BUILD,
                            map=self.world.map, catalog=W.catalog(), web_url=self.web_url))
             self.dispatch(out)
             self.broadcast_state()

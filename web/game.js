@@ -17,13 +17,35 @@ function itemIcon(key, cat) { return Art.iconCanvas(key, cat); }
 function treeKind(season, x, y) { const list = SEASON[season].trees; return list[hash(x * 3 + 1, y * 7 + 2) % list.length]; }
 
 // ------------------------------------------------------------------ state
-let ws = null, me = null, state = null, tiles = {}, map = [], catalog = null, farmName = "Cozy Hollow", noChest = new Set();
+let ws = null, me = null, state = null, tiles = {}, map = [], catalog = null, farmName = "Cozy Hollow", noChest = new Set(), portals = new Set();
+let RM = [], RG = [], areaBanner = null;   // RM: the map being drawn this frame; RG: the ground under it (props sit on their surroundings)
+const _ground = new Map();
+function groundOf(M) {
+  /* the ground under every tile: ground tiles are themselves; a bench, lamp or fountain on a street takes the street's ground */
+  let G = _ground.get(M);
+  if (G) return G;
+  const GROUNDS = ".:,=Hrvz~d", PAVED = ":=,rzv";
+  G = M.map((row, y) => Array.from(row, (c, x) => {
+    if (GROUNDS.includes(c)) return c;
+    const n = {}; let best = ".", bestN = 0;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const k = (M[y + dy] || "")[x + dx]; if (k && PAVED.includes(k)) n[k] = (n[k] || 0) + 1; }
+    for (const k in n) if (n[k] > bestN) { best = k; bestN = n[k]; }
+    return bestN >= 2 || (bestN >= 1 && "FJlbg!".includes(c)) ? best : ".";
+  }));
+  _ground.set(M, G);
+  return G;
+}
 let mode = "login";
 let menu = null, fishing = null;
 const viz = {};
 const my = { ready: false, x: 0, y: 0, tx: 0, ty: 0, stepping: false, dir: "down", dist: 0, lastSend: 0, lastTurn: 0, loc: "farm", queued: null };
 function curLoc() { return my.loc || "farm"; }
-function curMap() { return curLoc() === "farm" ? map : (catalog.interiors[curLoc()] || map); }
+function isArea(loc) { return !!(catalog && catalog.areas && catalog.areas[loc]); }
+function isOutdoor(loc) { return loc === "farm" || isArea(loc); }
+function curMap() { const l = curLoc(); return l === "farm" ? map : isArea(l) ? catalog.areas[l] : (catalog.interiors[l] || map); }
+function areaTiles(loc) { return loc === "farm" ? tiles : ((state && state.areas && state.areas[loc]) || {}); }
+const AREA_WALK = ".:,=Hrvz";
+const AREA_BASE = { mine1: "v", mine2: "v", mine3: "v", frontier: "z" };   // ground under everything (grass elsewhere)
 const cam = { x: 35, y: 15, snap: true };
 let logLines = [], toastTimer = null, buildings = [];
 let drops = [], fireflies = [], petals = [], smoke = [], butterflies = [], hearts = [];
@@ -140,7 +162,10 @@ function connect() {
 function send(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
 function handle(m) {
   if (m.t === "welcome") {
+    if (window.__build && m.build && m.build !== window.__build) { location.reload(); return; }   // the farm was updated: fetch the new game
+    window.__build = m.build;
     farmName = m.farm; map = m.map; catalog = m.catalog; buildings = findBuildings(map);
+    portals = new Set((catalog.portals || []).map(([l, x, y]) => l + "," + x + "," + y));
     noChest = new Set((catalog.no_chest || []).map(([x, y]) => x + "," + y));
     logLines = m.log.slice(-6).map((e) => ({ text: stamp(e.ts) + " " + e.text, style: "log", at: Date.now() }));
     $("#login").classList.add("hidden"); $("#game").classList.remove("hidden");
@@ -170,7 +195,8 @@ function handle(m) {
       if (sig != null && sig !== menu.sig) renderMenu();
     }
   } else if (m.t === "msg") {
-    addLog(m.text, m.style || "info"); toast(m.text, m.style || "info");
+    addLog(m.text, m.style || "info");
+    if (!/^~ .* ~$/.test(m.text)) toast(m.text, m.style || "info");   // arriving somewhere gets the name card on the map instead
     const tx = m.text;
     if (m.style === "ping") sfx("ping");
     else if (/^Harvested|^Picked|^Found|^Caught/.test(tx)) sfx("harvest");
@@ -197,7 +223,11 @@ function handle(m) {
 }
 function reconcile(p, now) {
   if (!my.ready) { my.ready = true; my.loc = p.loc || "farm"; my.x = my.tx = p.x; my.y = my.ty = p.y; my.dir = facingName(p.facing); cam.x = p.x + 0.5; cam.y = p.y + 0.5; cam.snap = true; return; }
-  if ((p.loc || "farm") !== my.loc) { my.loc = p.loc || "farm"; my.x = my.tx = p.x; my.y = my.ty = p.y; my.stepping = false; my.dir = facingName(p.facing); cam.snap = true; held.clear(); return; }
+  if ((p.loc || "farm") !== my.loc) {
+    const from = my.loc; my.loc = p.loc || "farm"; my.x = my.tx = p.x; my.y = my.ty = p.y; my.stepping = false; my.dir = facingName(p.facing); cam.snap = true; held.clear();
+    if (isOutdoor(my.loc) && isOutdoor(from) && catalog.area_names) areaBanner = { text: catalog.area_names[my.loc].replace(/^the /, "The "), at: performance.now() };
+    return;
+  }
   const stale = now - my.lastSend < 350;          // our latest step may not be in this snapshot yet
   if ((p.x !== my.tx || p.y !== my.ty) && !stale) { my.x = my.tx = p.x; my.y = my.ty = p.y; my.stepping = false; }
   if (!held.size && !my.stepping) my.dir = facingName(p.facing);
@@ -220,9 +250,10 @@ function findBuildings(rows) {
 }
 function buildingAt(x, y) { for (const b of buildings) if (x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1) return b; return null; }
 function walkable(x, y) {
-  const rows = curMap();
+  const rows = curMap(), loc = curLoc();
   if (y < 0 || y >= rows.length || x < 0 || x >= rows[0].length) return false;
-  if (curLoc() !== "farm") { const ch = rows[y][x]; return ch === "." || ch === "r" || ch === "x"; }
+  if (isArea(loc)) { const t = areaTiles(loc)[x + "," + y]; return AREA_WALK.includes(rows[y][x]) && !(t && t.o); }
+  if (loc !== "farm") { const ch = rows[y][x]; return ch === "." || ch === "r" || ch === "x"; }
   if (!".:,fGd".includes(rows[y][x])) return false;
   if (state && state.cows && state.cows.some((cw) => cw.x === x && cw.y === y)) return false;
   if (chestAt(x, y)) return false;
@@ -336,11 +367,39 @@ function toast(text, style) {
   const t = $("#toast"); t.textContent = text; t.className = style || ""; t.classList.remove("hidden");
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add("hidden"), style === "good" || style === "ping" ? 5000 : 3500);
 }
+function describeArea(p) {
+  /* the "Here / Ahead" line out in the valley */
+  const loc = p.loc, rows = catalog.areas[loc], at = areaTiles(loc), sel = heldItem();
+  const name = (c) => ((catalog.area_terrain || {})[c] || catalog.terrain_names[c] || "").replace(/^./, (m) => m.toUpperCase());
+  const here = catalog.area_names[loc].replace(/^the /, "The ") + " - " + name(rows[p.y][p.x]);
+  const fx = p.x + p.facing[0], fy = p.y + p.facing[1], ft = (rows[fy] || "")[fx] || "#", fd = at[fx + "," + fy] || {}, hd = at[p.x + "," + p.y] || {};
+  let ahead = "";
+  const portal = portals.has(loc + "," + fx + "," + fy);
+  if (fd.g || hd.g) ahead = catalog.items[fd.g || hd.g].name + " - E to pick.";
+  else if (fd.o) ahead = (fd.o === "stone" ? "A rock" : "Rock with " + catalog.items[fd.o].name) + (sel === "pickaxe" ? " - E to break it." : " - hold the pickaxe (5) and press E.");
+  else if (portal && ft === "@") { const b = areaBuildings(loc).find((q) => fx >= q.x0 && fx <= q.x1 && fy >= q.y0 && fy <= q.y1); ahead = (b && b.label ? b.label.replace(/\b\w+/g, (w) => w[0] + w.slice(1).toLowerCase()) : "A door") + " - walk in."; }
+  else if (ft === "U" || ft === "D") ahead = "Ladder " + (ft === "U" ? "up" : "down") + " - walk onto it.";
+  else if (portal) ahead = "The path goes on - keep walking.";
+  else if (ft === "~") ahead = "Water - E refills the can, F fishes.";
+  else if (ft === "V") ahead = loc === "beach" ? "The boat to Palm Isle - E to sail." : "The boat home - E to sail back.";
+  else if (ft === "Q") ahead = loc === "town" ? "Stagecoach to Dusty Gulch - E to ride." : "Stagecoach to Hollow Town - E to ride.";
+  else if (ft === "!") ahead = "Notice board - E to read the request.";
+  else if (ft === "w" || ft === "I") ahead = name(ft) + " - E refills the can.";
+  else if (ft === "@") ahead = "A building. The door is at the front.";
+  else if ("FELJOgbBchlmKCTPAs".includes(ft)) ahead = name(ft) + " - E to have a look.";
+  return "Here: " + here + (ahead ? "     Ahead: " + ahead : "");
+}
 function heldItem() { if (!me || !me.inventory.length) return null; return me.inventory[Math.min(me.selected, me.inventory.length - 1)][0]; }
 function describeHere() {
   const p = myPlayer(); if (!p || !catalog) return "";
+  if (isArea(p.loc || "farm")) return describeArea(p);
   if ((p.loc || "farm") !== "farm") {
     const rows = catalog.interiors[p.loc], fx = p.x + p.facing[0], fy = p.y + p.facing[1], ch = (rows[fy] || "")[fx] || "#";
+    const keeper = (catalog.keepers || {})[p.loc];
+    if (keeper) {
+      const what = ch === "n" || ch === "S" ? keeper + " - E to talk" + (p.loc === "store" ? " and shop." : ".") : ch === "x" ? "The door - walk onto it to go outside." : (catalog.interior_names[ch] || "").replace(/^./, (c) => c.toUpperCase());
+      return "Inside: " + keeper + "'s place. Ahead: " + what;
+    }
     const nm = catalog.interior_names[ch] || "";
     const hint = { c: " - E opens the shared chest.", S: " - E to shop.", q: " - E to shop.", k: " - E for the journal.", x: " - walk onto it to go outside." }[ch] || "";
     return "Inside the " + p.loc + ". Ahead: " + nm.replace(/^./, (c) => c.toUpperCase()) + hint;
@@ -560,6 +619,7 @@ function renderMenu(fresh) {
       "<p><kbd>E</kbd> or <kbd>Space</kbd> does the natural thing: till grass, plant the seed in hand, water, harvest, pick forage, refill the can at the pond or well, open the shop / bin / board.</p>" +
       "<p><kbd>F</kbd> fishes when facing the pond: keep the fish inside your net with <kbd>&larr;</kbd> <kbd>&rarr;</kbd> or the mouse.</p>" +
       "<p><kbd>X</kbd> clears the tile you stand on, or picks up the storage chest you face (carry it and press <kbd>E</kbd> to set it down). <kbd>1</kbd>-<kbd>9</kbd> pick what you hold, <kbd>I</kbd> opens the bag, <kbd>J</kbd> the journal, <kbd>T</kbd> chats, <kbd>M</kbd> music, <kbd>+</kbd>/<kbd>-</kbd> zoom.</p>" +
+      "<p>Explore the valley: walk off the farm's paths west to <b>Hollow Town</b> (shops, saloon, museum, folks to talk to), north to <b>Summit Ridge</b> and its <b>mine</b> (break ore and gems with the pickaxe, ladders go deeper), south to the <b>Whisperwood</b>. From town go south to <b>Driftwood Beach</b>, where a boat at the pier sails to <b>Palm Isle</b>; the stagecoach in town rides to <b>Dusty Gulch</b>. Fish in rivers, lakes and the sea, and forage what each place grows.</p>" +
       "<p>Crops grow in real time even when nobody is here. Wet soil grows 3x faster for 4 hours; rain waters everything; sprinklers keep their 8 neighbours wet. Coins are shared.</p>" +
       "<p>Chat commands: <code>/ping@all [msg]</code> says hi on every terminal of this account, <code>/look boy|girl</code>, <code>/color pink</code>, <code>/farm name</code>, <code>/give player item n</code>, <code>/me action</code>.</p>" +
       "<p>Friends can join from a browser at this address, or the host runs <code>python3 farm.py share</code> to invite other computers.</p>";
@@ -705,7 +765,7 @@ function tryStep(dir, now = performance.now()) {
   my.dir = dir;
   const nx = my.tx + ddx, ny = my.ty + ddy;
   const rows = curMap(), ch = (rows[ny] || "")[nx];
-  const teleport = (curLoc() === "farm" && Object.values(catalog.doors).some(([px_, py_]) => px_ === nx && py_ === ny)) || (curLoc() !== "farm" && ch === "x");
+  const teleport = portals.has(curLoc() + "," + nx + "," + ny);
   if (teleport) { if (now - my.lastTurn > 400) { my.lastTurn = now; my.lastSend = now; send({ t: "move", dx: ddx, dy: ddy }); } return true; }
   if (walkable(nx, ny)) { my.tx = nx; my.ty = ny; my.stepping = true; my.lastSend = now; send({ t: "move", dx: ddx, dy: ddy }); return true; }
   if (now - my.lastTurn > 250) { my.lastTurn = now; my.lastSend = now; send({ t: "move", dx: ddx, dy: ddy }); }
@@ -714,7 +774,7 @@ function tryStep(dir, now = performance.now()) {
 
 // ------------------------------------------------------------------ rendering
 let lastFrame = performance.now(), waterFrame = 0, waterAcc = 0, smokeAcc = 0;
-function isType(x, y, ch) { return y >= 0 && y < map.length && x >= 0 && x < map[0].length && map[y][x] === ch; }
+function isType(x, y, ch) { return y >= 0 && y < RG.length && x >= 0 && x < RG[0].length && RG[y][x] === ch; }
 function isSoil(x, y) { const d = tiles[x + "," + y]; return !!(d && d.s); }
 function blob(sx, sy, same, under, fill, edge, bumpy) {
   /* rounded corners where two orthogonal neighbours differ, plus a soft edge line on open sides */
@@ -764,14 +824,18 @@ function renderFrame(now) {
     else { v.x += dx / dist * sp; v.y += dy / dist * sp; v.dist += sp; }
     v.moving = dist > 0.001;
   }
-  if (curLoc() !== "farm") { renderInterior(now, dt); return; }
+  const loc = curLoc();
+  if (!isOutdoor(loc)) { renderInterior(now, dt); return; }
+  const M = curMap(), farm = loc === "farm", ATL = areaTiles(loc), cave = /^mine/.test(loc), base = AREA_BASE[loc];
+  RM = M; RG = groundOf(M);
+  const cell = (x, y) => (M[y] || "")[x] || "#", gcell = (x, y) => (RG[y] || [])[x] || "#";
   const cw = Math.floor(canvas.clientWidth * dpr), ch = Math.floor(canvas.clientHeight * dpr);
   if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
   ctx.imageSmoothingEnabled = false;
   waterAcc += dt; if (waterAcc > 0.45) { waterAcc = 0; waterFrame = (waterFrame + 1) % 3; }
-  const mapW = map[0].length, mapH = map.length;
+  const mapW = M[0].length, mapH = M.length;
   if (my.ready) {
-    const focus = (window.cozy && window.cozy.look && isFinite(window.cozy.look.x) && isFinite(window.cozy.look.y)) ? window.cozy.look : state.wedding ? { x: state.wedding.altar[0][0] + 1, y: state.wedding.altar[0][1] + 2 } : { x: my.x + 0.5, y: my.y + 0.5 };
+    const focus = (window.cozy && window.cozy.look && isFinite(window.cozy.look.x) && isFinite(window.cozy.look.y)) ? window.cozy.look : farm && state.wedding ? { x: state.wedding.altar[0][0] + 1, y: state.wedding.altar[0][1] + 2 } : { x: my.x + 0.5, y: my.y + 0.5 };
     const [tx, ty] = camTarget(mapW, mapH, cw, ch, focus.x, focus.y);
     if (cam.snap || Math.abs(tx - cam.x) > 8 || Math.abs(ty - cam.y) > 8) { cam.x = tx; cam.y = ty; cam.snap = false; }
     const k = 1 - Math.exp(-7 * dt);
@@ -781,63 +845,96 @@ function renderFrame(now) {
   _ox = ox; _oy = oy;
   const x0 = Math.max(0, Math.floor(-ox / T) - 1), y0 = Math.max(0, Math.floor(-oy / T) - 1);
   const x1 = Math.min(mapW - 1, Math.ceil((cw - ox) / T) + 1), y1 = Math.min(mapH - 1, Math.ceil((ch - oy) / T) + 2);
-  const season = state.season, s = SEASON[season], night = nightAlpha();
-  ctx.fillStyle = "#1e2a1e"; ctx.fillRect(0, 0, cw, ch);
-  // 1. ground: grass everywhere first, then the blobby ground types on top
-  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) ctx.drawImage(Art.grassTile(season, hash(x, y) % 24, Math.round((Art.noise2(x, y) - 0.5) * 5)), ox + x * T, oy + y * T, T, T);
-  if (Art.decorSprite && Art.DECOR_KINDS) for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-    if (map[y][x] !== "." || tiles[x + "," + y]) continue;
-    const h = hash(x * 5 + 2, y * 3 + 1), n = Art.noise2(x + 40, y + 40);
+  const season = loc === "island" ? "summer" : state.season, s = SEASON[season], night = cave ? 0.85 : nightAlpha();
+  const weather = cave ? "sun" : (loc === "island" && state.weather === "snow") ? "rain" : state.weather;
+  const under = base ? Art.GROUND2[base].base : s.grass;
+  const rockKind = (c) => c === "R" ? "cave" : loc === "frontier" ? "frontier" : "mountain";
+  ctx.fillStyle = cave ? "#120e0b" : "#1e2a1e"; ctx.fillRect(0, 0, cw, ch);
+  // 1. ground: the area's base everywhere first (grass, desert or cave floor), then the blobby ground types on top
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const img = base ? Art.GROUND2[base].tile(hash(x, y)) : Art.grassTile(season, hash(x, y) % 24, Math.round((Art.noise2(x, y) - 0.5) * 5));
+    ctx.drawImage(img, ox + x * T, oy + y * T, T, T);
+  }
+  if (!base && Art.decorSprite && Art.DECOR_KINDS) for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    if (M[y][x] !== "." || (farm ? tiles : ATL)[x + "," + y]) continue;
+    const h = hash(x * 5 + 2, y * 3 + 1), n = Art.noise2(x, y);
     if ((h % 100) / 100 > 0.10 + n * 0.12) continue;
     const kind = Art.DECOR_KINDS[(h >> 8) % Art.DECOR_KINDS.length];
     const d = Art.decorSprite(season, kind, (h >> 4) % 8); if (d) ctx.drawImage(d, ox + x * T, oy + y * T, T, T);
   }
+  const faces = [];
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-    const sx = ox + x * T, sy = oy + y * T, h = hash(x, y), ch_ = map[y][x];
+    const sx = ox + x * T, sy = oy + y * T, h = hash(x, y), ch_ = RG[y][x];
     if (ch_ === ",") {
-      ctx.drawImage(Art.GROUND[","].tile(h), sx, sy, T, T); blob(sx, sy, (dx, dy) => isType(x + dx, y + dy, ",") || isType(x + dx, y + dy, "~"), s.grass, Art.GROUND[","].base, Art.GROUND[","].edge, true);
+      ctx.drawImage(Art.GROUND[","].tile(h), sx, sy, T, T); blob(sx, sy, (dx, dy) => isType(x + dx, y + dy, ",") || isType(x + dx, y + dy, "~") || isType(x + dx, y + dy, "H"), under, Art.GROUND[","].base, Art.GROUND[","].edge, true);
       ctx.fillStyle = "rgba(120,90,50,.16)";
       if (isType(x, y - 1, "~")) ctx.fillRect(sx, sy, T, 6 * SCALE); if (isType(x, y + 1, "~")) ctx.fillRect(sx, sy + T - 6 * SCALE, T, 6 * SCALE);
       if (isType(x - 1, y, "~")) ctx.fillRect(sx, sy, 6 * SCALE, T); if (isType(x + 1, y, "~")) ctx.fillRect(sx + T - 6 * SCALE, sy, 6 * SCALE, T);
     }
-    if (ch_ === ":") { ctx.drawImage(Art.GROUND[":"].tile(h), sx, sy, T, T); blob(sx, sy, (dx, dy) => isType(x + dx, y + dy, ":"), s.grass, Art.GROUND[":"].base, Art.GROUND[":"].edge, true); }
-    if (ch_ === "d") { ctx.drawImage(Art.GROUND["d"].tile(h), sx, sy, T, T); blob(sx, sy, (dx, dy) => isType(x + dx, y + dy, "d") || isType(x + dx, y + dy, ":"), s.grass, Art.GROUND["d"].base, Art.GROUND["d"].edge, true); }
+    if (ch_ === ":") { ctx.drawImage(Art.GROUND[":"].tile(h), sx, sy, T, T); blob(sx, sy, (dx, dy) => isType(x + dx, y + dy, ":") || isType(x + dx, y + dy, "=") || isType(x + dx, y + dy, "H"), under, Art.GROUND[":"].base, Art.GROUND[":"].edge, true); }
+    if (ch_ === "d") { ctx.drawImage(Art.GROUND["d"].tile(h), sx, sy, T, T); blob(sx, sy, (dx, dy) => isType(x + dx, y + dy, "d") || isType(x + dx, y + dy, ":"), under, Art.GROUND["d"].base, Art.GROUND["d"].edge, true); }
+    if (ch_ === "=") { const G = Art.GROUND2["="]; ctx.drawImage(G.tile(h), sx, sy, T, T); blob(sx, sy, (dx, dy) => "=:H".includes(gcell(x + dx, y + dy)), under, G.base, G.edge, false); }
+    if (ch_ === "r" || (ch_ === "z" && base !== "z") || (ch_ === "v" && base !== "v")) { const G = Art.GROUND2[ch_]; ctx.drawImage(G.tile(h), sx, sy, T, T); blob(sx, sy, (dx, dy) => isType(x + dx, y + dy, ch_) || isType(x + dx, y + dy, ":"), under, G.base, G.edge, true); }
     if (ch_ === "~") {
       ctx.drawImage(Art.waterTile((waterFrame + ((x + y) % 3)) % 3, hash(x + 11, y + 7) % 4), sx, sy, T, T);
-      const under = isType(x - 1, y, ",") || isType(x + 1, y, ",") || isType(x, y - 1, ",") || isType(x, y + 1, ",") ? Art.GROUND[","].base : s.grass;
-      blob(sx, sy, (dx, dy) => isType(x + dx, y + dy, "~"), under, "#3d8dd4", "#5aa6e0");
+      const wUnder = isType(x - 1, y, ",") || isType(x + 1, y, ",") || isType(x, y - 1, ",") || isType(x, y + 1, ",") ? Art.GROUND[","].base : under;
+      blob(sx, sy, (dx, dy) => "~HV".includes(cell(x + dx, y + dy)) || (x + dx < 0 || y + dy < 0 || x + dx >= mapW || y + dy >= mapH), wUnder, "#3d8dd4", "#5aa6e0");
       const shallow = "rgba(150,215,245,.45)", foam = "rgba(240,250,255," + (0.35 + 0.25 * Math.sin(now / 500 + x + y)) + ")";
       const side = (open, rx, ry, rw, rh, fx, fy, fw, fh) => { if (!open) return; ctx.fillStyle = shallow; ctx.fillRect(rx, ry, rw, rh); ctx.fillStyle = foam; for (let i = 0; i < 3; i++) ctx.fillRect(fx + (fw ? i * 9 * SCALE : 0), fy + (fh ? i * 9 * SCALE : 0), fw ? 4 * SCALE : SCALE, fh ? 4 * SCALE : SCALE); };
-      side(!isType(x, y - 1, "~"), sx, sy, T, 5 * SCALE, sx + 4 * SCALE, sy + 2 * SCALE, 1, 0);
-      side(!isType(x, y + 1, "~"), sx, sy + T - 5 * SCALE, T, 5 * SCALE, sx + 6 * SCALE, sy + T - 3 * SCALE, 1, 0);
-      side(!isType(x - 1, y, "~"), sx, sy, 5 * SCALE, T, sx + 2 * SCALE, sy + 4 * SCALE, 0, 1);
-      side(!isType(x + 1, y, "~"), sx + T - 5 * SCALE, sy, 5 * SCALE, T, sx + T - 3 * SCALE, sy + 6 * SCALE, 0, 1);
+      const wet = (dx, dy) => "~HV".includes(cell(x + dx, y + dy)) || x + dx < 0 || y + dy < 0 || x + dx >= mapW || y + dy >= mapH;
+      side(!wet(0, -1), sx, sy, T, 5 * SCALE, sx + 4 * SCALE, sy + 2 * SCALE, 1, 0);
+      side(!wet(0, 1), sx, sy + T - 5 * SCALE, T, 5 * SCALE, sx + 6 * SCALE, sy + T - 3 * SCALE, 1, 0);
+      side(!wet(-1, 0), sx, sy, 5 * SCALE, T, sx + 2 * SCALE, sy + 4 * SCALE, 0, 1);
+      side(!wet(1, 0), sx + T - 5 * SCALE, sy, 5 * SCALE, T, sx + T - 3 * SCALE, sy + 6 * SCALE, 0, 1);
+    }
+    if (ch_ === "H") {
+      const vert = "HV".includes(cell(x, y - 1)) || "HV".includes(cell(x, y + 1));
+      ctx.drawImage(Art.plankTile(vert, h % 4), sx, sy, T, T);
+      ctx.fillStyle = "#5a3a22";
+      if (vert) { if (isType(x - 1, y, "~")) { ctx.fillRect(sx, sy, 2 * SCALE, T); if (y % 2 === 0) ctx.fillRect(sx - SCALE, sy + 4 * SCALE, 4 * SCALE, 5 * SCALE); } if (isType(x + 1, y, "~")) { ctx.fillRect(sx + T - 2 * SCALE, sy, 2 * SCALE, T); if (y % 2 === 0) ctx.fillRect(sx + T - 3 * SCALE, sy + 4 * SCALE, 4 * SCALE, 5 * SCALE); } }
+      else { if (isType(x, y - 1, "~")) ctx.fillRect(sx, sy, T, 2 * SCALE); if (isType(x, y + 1, "~")) ctx.fillRect(sx, sy + T - 2 * SCALE, T, 2 * SCALE); }
+    }
+    if (M[y][x] === "C" || M[y][x] === "R") {
+      const rc = M[y][x], same = (c) => c === rc || (c === "@" && rc === "C");
+      const part = !same(cell(x, y + 1)) ? "face" : !same(cell(x, y + 2)) ? "lip" : "top";
+      const v = part === "top" ? h % 4 : ((x % 4) + 4) % 4;
+      ctx.drawImage(Art.cliffTile(rockKind(rc), part, v, season, part !== "top" && !same(cell(x - 1, y)), part !== "top" && !same(cell(x + 1, y))), sx, sy, T, T);
+      if (part === "face" && !same(cell(x, y + 1))) faces.push([sx, sy + T]);
     }
   }
-  // 2. soil, buildings, props, crops
+  ctx.fillStyle = cave ? "rgba(0,0,0,.35)" : "rgba(30,20,10,.22)";
+  for (const [fx, fy] of faces) { ctx.fillRect(fx, fy, T, 5 * SCALE); ctx.fillRect(fx, fy + 5 * SCALE, T, 3 * SCALE); }
+  // 2. soil, props, crops, forage and ore, trees as depth-sorted entities
   const ents = [];
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-    const sx = ox + x * T, sy = oy + y * T, h = hash(x, y), ch_ = map[y][x], d = tiles[x + "," + y];
+    const sx = ox + x * T, sy = oy + y * T, h = hash(x, y), ch_ = M[y][x], d = farm ? tiles[x + "," + y] : null;
     if (d && d.s) {
       const kind = d.f ? "fert" : d.w ? "wet" : "dry";
       ctx.drawImage(Art.soilTile(kind, hash(x + 5, y + 9) % 4), sx, sy, T, T);
       blob(sx, sy, (dx, dy) => isSoil(x + dx, y + dy), s.grass, kind === "wet" ? "#6b4629" : "#9d6a3a", Art.SOIL_EDGE[kind]);
     }
-    if ("WS+N".includes(ch_)) continue;
+    if ("WS+N@".includes(ch_)) continue;
     if (ch_ === "#" || ch_ === "G") {
-      const conn = (dx, dy) => { const r = map[y + dy]; return !!r && (r[x + dx] === "#" || r[x + dx] === "G"); };
+      const conn = (dx, dy) => { const r = M[y + dy]; return !!r && (r[x + dx] === "#" || r[x + dx] === "G"); };
       const mask = (conn(0, -1) ? 1 : 0) | (conn(1, 0) ? 2 : 0) | (conn(0, 1) ? 4 : 0) | (conn(-1, 0) ? 8 : 0);
       ctx.drawImage(ch_ === "#" ? Art.fenceSprite(mask) : Art.gateSprite(!!(mask & 5)), sx, sy, T, T);
     }
-    else if ("o$!fBchmlbwspg".includes(ch_)) ctx.drawImage(Art.propSprite(ch_), sx, sy, T, T);
+    else if ("o$!fBchmlbwspg".includes(ch_)) { if (ch_ === "o" || ch_ === "l" || ch_ === "!" || ch_ === "g") ents.push({ y: y + 0.4, draw: () => ctx.drawImage(Art.propSprite(ch_), sx, sy, T, T) }); else ctx.drawImage(Art.propSprite(ch_), sx, sy, T, T); }
+    else if ("ELIJOUD".includes(ch_)) { const spr = Art.areaProp(ch_, h); ents.push({ y: y + 0.4, draw: () => ctx.drawImage(spr, sx, sy, T, T) }); }
     else if (ch_ === "u") ents.push({ y: y + 0.4, draw: () => { ctx.fillStyle = "rgba(0,0,0,.15)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, sy + T - 3 * SCALE, 12 * SCALE, 4 * SCALE, 0, 0, 6.3); ctx.fill(); ctx.drawImage(Art.propSprite("u"), sx, sy - 4 * SCALE, T, T); } });
     else if (ch_ === "Y") ents.push({ y: y + 0.9, draw: () => { ctx.fillStyle = "rgba(0,0,0,.22)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, sy + T - 2 * SCALE, 11 * SCALE, 4 * SCALE, 0, 0, 6.3); ctx.fill(); ctx.drawImage(Art.priestSprite(Math.floor(now / 700) % 2), sx, sy - 16 * SCALE, T, 48 * SCALE); } });
-    else if (ch_ === "~" && h % 9 === 0 && isType(x, y - 1, "~") && isType(x, y + 1, "~") && isType(x - 1, y, "~") && isType(x + 1, y, "~")) ctx.drawImage(Art.lilyPad(h % 4), sx, sy, T, T);
+    else if (ch_ === "~" && h % 9 === 0 && cell(x, y - 1) === "~" && cell(x, y + 1) === "~" && cell(x - 1, y) === "~" && cell(x + 1, y) === "~" && isType(x, y - 1, "~") && isType(x, y + 1, "~") && isType(x - 1, y, "~") && isType(x + 1, y, "~") && !(loc === "beach" || loc === "island")) ctx.drawImage(Art.lilyPad(h % 4), sx, sy, T, T);
     else if (ch_ === "T") {
       const dEdge = Math.min(x - 1, mapW - 2 - x, y - 1, mapH - 2 - y);
       if (dEdge === 1 && h % 5 < 2) ctx.drawImage(Art.bushSprite(treeKind(season, x, y), h % 4), sx, sy, T, T);
       else ents.push({ y: y + 0.5, tree: true, sx, sy, kind: treeKind(season, x, y), variant: h % 16 });
     }
+    else if (ch_ === "P") ents.push({ y: y + 0.5, big: Art.pineSprite(season, h % 8), sx, sy });
+    else if (ch_ === "A") ents.push({ y: y + 0.5, palm: Art.palmSprite(h % 6), sx, sy });
+    else if (ch_ === "K") ents.push({ y: y + 0.5, draw: () => { ctx.fillStyle = "rgba(0,0,0,.18)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, sy + T - 3 * SCALE, 10 * SCALE, 3 * SCALE, 0, 0, 6.3); ctx.fill(); ctx.drawImage(Art.cactusSprite(h % 6), sx, sy - 16 * SCALE, T, 48 * SCALE); } });
+    else if (ch_ === "F" && cell(x - 1, y) !== "F" && cell(x, y - 1) !== "F") ents.push({ y: y + 1.5, draw: () => ctx.drawImage(Art.fountainSprite(Math.floor(now / 220) % 3), sx, sy - 16 * SCALE, 3 * T, 80 * SCALE / 1) });
+    else if (ch_ === "Q" && cell(x - 1, y) !== "Q" && cell(x, y - 1) !== "Q") ents.push({ y: y + 1.6, draw: () => ctx.drawImage(Art.coachSprite(), sx, sy - 16 * SCALE, 3 * T, 80 * SCALE) });
+    else if (ch_ === "V" && cell(x - 1, y) !== "V") ctx.drawImage(Art.boatSprite(), sx, sy + Math.round(Math.sin(now / 600) * SCALE), 2 * T, T);
     if (d) {
       const flying = inFlight(x, y, now);   // something is still falling onto this tile: show it when it lands
       if (d.c && !flying) ctx.drawImage(Art.cropSprite(d.c[0], d.c[1], d.c[2]), sx, sy, T, T);
@@ -847,35 +944,45 @@ function renderFrame(now) {
       if (rareTree) { if (d.t[1] < 2) { if (!flying) ctx.drawImage(Art.rareTreeSprite(rareTree, d.t[1], season), sx, sy, T, T); } else ents.push({ y: y + 0.5, rareTree, sx, sy, season }); }
       else if (d.t) { if (d.t[1] < 2) { if (!flying) ctx.drawImage(Art.youngTree(d.t[1], season), sx, sy, T, T); } else ents.push({ y: y + 0.5, tree: true, sx, sy, kind: season === "winter" ? "snow" : "green", variant: h % 16, fruitColor: ITEM_HEX[d.t[0]] || "#e8394a", fruit: d.t[2] }); }
     }
+    if (!farm) {
+      const ad = ATL[x + "," + y];
+      if (ad && ad.g && !inFlight(x, y, now)) ctx.drawImage(Art.forageSprite(ad.g), sx, sy, T, T);
+      if (ad && ad.o) ents.push({ y: y + 0.3, draw: () => ctx.drawImage(Art.oreSprite(ad.o, cave, h), sx, sy, T, T) });
+    }
   }
-  // 3. porch, shadows, smoke; buildings themselves are drawn as depth-sorted sprites
-  for (const b of buildings) {
+  // 3. buildings: shadows, the farmhouse porch and smoke, then the sprites as depth-sorted entities
+  const blds = farm ? buildings : areaBuildings(loc);
+  for (const b of blds) {
     if (b.x1 < x0 - 2 || b.x0 > x1 + 2 || b.y1 < y0 - 3 || b.y0 > y1 + 1) continue;
-    ctx.fillStyle = "rgba(0,0,0,.16)";
-    ctx.fillRect(ox + (b.x1 + 1) * T + Art.OV * SCALE, oy + (b.y0 + 2) * T, 6 * SCALE, (b.y1 - b.y0 - 1) * T + 6 * SCALE);
-    ctx.fillRect(ox + b.x0 * T + 6 * SCALE, oy + (b.y1 + 1) * T, (b.x1 - b.x0 + 1) * T + Art.OV * SCALE, 6 * SCALE);
-    if (b.kind === "W") {
+    if (b.kind !== "mine" && b.kind !== "volcano") {
+      ctx.fillStyle = "rgba(0,0,0,.16)";
+      ctx.fillRect(ox + (b.x1 + 1) * T + Art.OV * SCALE, oy + (b.y0 + 2) * T, 6 * SCALE, (b.y1 - b.y0 - 1) * T + 6 * SCALE);
+      ctx.fillRect(ox + b.x0 * T + 6 * SCALE, oy + (b.y1 + 1) * T, (b.x1 - b.x0 + 1) * T + Art.OV * SCALE, 6 * SCALE);
+    }
+    if (farm && b.kind === "W") {
       const dx = Math.floor((b.x0 + b.x1) / 2), py = b.y1 + 1;
       ["L", "M", "R"].forEach((part, i) => ctx.drawImage(Art.porchTile(part), ox + (dx - 1 + i) * T, oy + py * T, T, T));
       smokeAcc += dt; if (smokeAcc > 0.45) { smokeAcc = 0; smoke.push({ x: b.x1 - 2.2, y: b.y0 - 0.55, a: 0.55, r: 2.5, vx: 0.15 + Math.random() * 0.2 }); }
     }
-    ents.push({ y: b.y1 + 0.6, draw: () => ctx.drawImage(Art.buildingSprite(b.kind, b.x1 - b.x0 + 1, b.y1 - b.y0 + 1, night > 0.2),
-      ox + b.x0 * T - Art.OV * SCALE, oy + b.y0 * T - Art.TOPPAD * SCALE, (b.x1 - b.x0 + 1) * T + 2 * Art.OV * SCALE, (b.y1 - b.y0 + 1) * T + Art.TOPPAD * SCALE) });
+    const w = b.x1 - b.x0 + 1, hh = b.y1 - b.y0 + 1;
+    const spr = farm ? Art.buildingSprite(b.kind, w, hh, night > 0.2) : Art.areaBuilding(b.kind, w, hh, night > 0.2, b.label, season);
+    ents.push({ y: b.y1 + 0.6, draw: () => ctx.drawImage(spr, ox + b.x0 * T - Art.OV * SCALE, oy + b.y0 * T - Art.TOPPAD * SCALE, w * T + 2 * Art.OV * SCALE, hh * T + Art.TOPPAD * SCALE) });
   }
   for (const sm of smoke) { sm.y -= 0.35 * dt; sm.x += sm.vx * dt; sm.a -= 0.1 * dt; sm.r += 1.4 * dt; }
   smoke = smoke.filter((sm) => sm.a > 0);
-  for (const sm of smoke) { ctx.fillStyle = "rgba(240,240,244," + sm.a + ")"; ctx.beginPath(); ctx.arc(ox + sm.x * T, oy + sm.y * T, sm.r * SCALE, 0, 6.3); ctx.fill(); }
+  if (farm) for (const sm of smoke) { ctx.fillStyle = "rgba(240,240,244," + sm.a + ")"; ctx.beginPath(); ctx.arc(ox + sm.x * T, oy + sm.y * T, sm.r * SCALE, 0, 6.3); ctx.fill(); }
   // 4. facing highlight
   const meP = myPlayer();
   if (meP) {
-    const fx = meP.x + meP.facing[0], fy = meP.y + meP.facing[1], ft = (map[fy] || "")[fx], fd = tiles[fx + "," + fy] || {};
-    if ("S$!+~wmBchblNspg.:".includes(ft) || fd.t || fd.g || chestAt(fx, fy)) {
+    const fx = meP.x + meP.facing[0], fy = meP.y + meP.facing[1], ft = cell(fx, fy), fd = (farm ? tiles : ATL)[fx + "," + fy] || {};
+    const hot = farm ? ("S$!+~wmBchblNspg.:".includes(ft) || fd.t || fd.g || chestAt(fx, fy)) : ("~!wmIEFJLOgVQUDBchbl".includes(ft) || fd.g || fd.o || portals.has(loc + "," + fx + "," + fy));
+    if (hot) {
       ctx.strokeStyle = "rgba(255,250,200," + (0.35 + 0.3 * Math.sin(now / 200)) + ")"; ctx.lineWidth = SCALE;
       ctx.strokeRect(ox + fx * T + 2 * SCALE, oy + fy * T + 2 * SCALE, T - 4 * SCALE, T - 4 * SCALE);
     }
   }
   // 5. entities sorted by row: the chest, cows, wedding guests, farmers
-  for (const chs of state.chests || []) {
+  if (farm) for (const chs of state.chests || []) {
     if (chs.x < x0 - 1 || chs.x > x1 + 1 || chs.y < y0 - 1 || chs.y > y1 + 1 || inFlight(chs.x, chs.y, now) || chestLifting(chs.x, chs.y, now)) continue;
     const cx = chs.x, cy = chs.y, sx = ox + cx * T, sy = oy + cy * T;
     ents.push({ y: cy + 0.6, draw: () => {
@@ -884,7 +991,7 @@ function renderFrame(now) {
       ctx.drawImage(Art.chestSprite(opened), sx, sy - 2 * SCALE, T, T);
     } });
   }
-  for (const cw of state.cows || []) {
+  if (farm) for (const cw of state.cows || []) {
     const v = cowViz[cw.id]; if (!v) continue;
     // the server moves a walking cow one tile per second, so glide at just over a tile a second and she never jumps
     const sp = 1.12 * dt, dx = v.tx - v.x, dy = v.ty - v.y, dist = Math.hypot(dx, dy);
@@ -899,7 +1006,15 @@ function renderFrame(now) {
       else ctx.drawImage(spr, sx, sy - 6 * SCALE, T, T);
     } });
   }
-  const wd = state.wedding;
+  if (loc === "frontier") for (const [cx_, cy_, f] of [[12, 25, 1], [18, 27, -1], [22, 24, 1], [15, 23, -1]]) {
+    if (cx_ < x0 - 1 || cx_ > x1 + 1 || cy_ < y0 - 1 || cy_ > y1 + 1) continue;
+    ents.push({ y: cy_ + 0.9, draw: () => {
+      const sx = ox + cx_ * T, sy = oy + cy_ * T, face = Math.floor(now / 7000 + cx_) % 2 ? f : -f, spr = Art.cowSprite(Math.floor(now / 650 + cx_) % 2, false);
+      ctx.fillStyle = "rgba(0,0,0,.2)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, sy + T - 3 * SCALE, 12 * SCALE, 4 * SCALE, 0, 0, 6.3); ctx.fill();
+      if (face < 0) { ctx.save(); ctx.translate(sx + T, sy - 6 * SCALE); ctx.scale(-1, 1); ctx.drawImage(spr, 0, 0, T, T); ctx.restore(); } else ctx.drawImage(spr, sx, sy - 6 * SCALE, T, T);
+    } });
+  }
+  const wd = farm ? state.wedding : null;
   if (wd) {
     const ax = ox + (wd.altar[0][0] + 1) * T, ay = oy + wd.altar[0][1] * T;
     ents.push({ y: wd.altar[0][1] + 0.2, draw: () => ctx.drawImage(Art.archSprite(), ax - 48 * SCALE, ay - 58 * SCALE, 96 * SCALE, 80 * SCALE) });
@@ -908,7 +1023,7 @@ function renderFrame(now) {
     }
   }
   for (const p of state.players) {
-    if (!p.online || (p.loc || "farm") !== "farm") continue;
+    if (!p.online || (p.loc || "farm") !== loc) continue;
     if (p.name === prefs.name) { if (my.ready) ents.push({ y: my.y + 0.9, draw: () => drawFarmer(p, my.x, my.y, my.dir, my.stepping ? 1 + Math.floor(my.dist * 4) % 7 : 0, ox, oy, now, heldItem()) }); continue; }
     const v = viz[p.name]; if (!v) continue;
     ents.push({ y: v.y + 0.9, draw: () => drawFarmer(p, v.x, v.y, v.facing, v.moving ? 1 + Math.floor(v.dist * 4) % 7 : 0, ox, oy, now, p.held) });
@@ -917,6 +1032,12 @@ function renderFrame(now) {
     if (e.tree) {
       ctx.fillStyle = "rgba(0,0,0,.2)"; ctx.beginPath(); ctx.ellipse(e.sx + T / 2, e.sy + T - 2 * SCALE, 18 * SCALE, 6 * SCALE, 0, 0, 6.3); ctx.fill();
       ctx.drawImage(Art.treeSprite(e.kind, e.variant, e.fruitColor, e.fruit), e.sx - 8 * SCALE, e.sy + T - 62 * SCALE, 48 * SCALE, 64 * SCALE);
+    } else if (e.big) {
+      ctx.fillStyle = "rgba(0,0,0,.2)"; ctx.beginPath(); ctx.ellipse(e.sx + T / 2, e.sy + T - 2 * SCALE, 16 * SCALE, 5 * SCALE, 0, 0, 6.3); ctx.fill();
+      ctx.drawImage(e.big, e.sx - 8 * SCALE, e.sy + T - 62 * SCALE, 48 * SCALE, 64 * SCALE);
+    } else if (e.palm) {
+      ctx.fillStyle = "rgba(0,0,0,.18)"; ctx.beginPath(); ctx.ellipse(e.sx + T / 2, e.sy + T - 2 * SCALE, 14 * SCALE, 4 * SCALE, 0, 0, 6.3); ctx.fill();
+      ctx.drawImage(e.palm, e.sx - 16 * SCALE, e.sy + T - 79 * SCALE, 64 * SCALE, 80 * SCALE);
     } else if (e.rareTree) {
       ctx.fillStyle = "rgba(0,0,0,.2)"; ctx.beginPath(); ctx.ellipse(e.sx + T / 2, e.sy + T - 2 * SCALE, 18 * SCALE, 6 * SCALE, 0, 0, 6.3); ctx.fill();
       ctx.drawImage(Art.rareTreeSprite(e.rareTree, 2, e.season), e.sx - 8 * SCALE, e.sy + T - 62 * SCALE, 48 * SCALE, 64 * SCALE);
@@ -924,7 +1045,7 @@ function renderFrame(now) {
   });
   drawFx(now, ox, oy);
   // 6. ambient life
-  if (night < 0.1 && hourNow() > 7 && hourNow() < 18.5 && state.weather === "sun" && season !== "winter") {
+  if (!cave && night < 0.1 && hourNow() > 7 && hourNow() < 18.5 && weather === "sun" && season !== "winter") {
     while (butterflies.length < 5) butterflies.push({ x: Math.random() * mapW, y: Math.random() * mapH, p: Math.random() * 6.3, c: ["#fff8d0", "#ffd0e8", "#d8f0ff"][butterflies.length % 3] });
     for (const bf of butterflies) {
       bf.x += Math.sin(now / 900 + bf.p) * dt * 1.2 + 0.2 * dt; bf.y += Math.cos(now / 700 + bf.p) * dt * 0.8;
@@ -934,9 +1055,9 @@ function renderFrame(now) {
       ctx.fillStyle = OUT; ctx.fillRect(bx, by + SCALE, SCALE, 2 * SCALE);
     }
   } else butterflies = [];
-  if (s.petals && state.weather === "sun") {
+  if (!cave && s.petals && weather === "sun") {
     while (petals.length < 30) petals.push({ x: Math.random() * cw, y: Math.random() * ch, p: Math.random() * 6.3, v: 40 + Math.random() * 40 });
-    ctx.fillStyle = s.petals;
+    ctx.fillStyle = loc === "frontier" ? "#d8b07a" : s.petals;
     for (const pt of petals) {
       pt.y += pt.v * dt * SCALE / 3; pt.x += (Math.sin(now / 800 + pt.p) * 40 + 15) * dt * SCALE / 3;
       if (pt.y > ch) { pt.y = -10; pt.x = Math.random() * cw; }
@@ -945,8 +1066,8 @@ function renderFrame(now) {
   } else petals = [];
   if (!wd) hearts = [];
   // 7. weather
-  if (state.weather !== "sun") {
-    const rain = state.weather === "rain";
+  if (weather !== "sun") {
+    const rain = weather === "rain";
     while (drops.length < (rain ? 160 : 90)) drops.push({ x: Math.random() * (cw + 300), y: Math.random() * ch, v: rain ? 900 + Math.random() * 500 : 60 + Math.random() * 60, dx: rain ? -120 : (Math.random() - .5) * 40 });
     ctx.strokeStyle = "rgba(200,230,255,.65)"; ctx.fillStyle = "rgba(255,255,255,.9)"; ctx.lineWidth = SCALE / 2;
     for (const dr of drops) {
@@ -957,13 +1078,13 @@ function renderFrame(now) {
     }
     ctx.fillStyle = rain ? "rgba(40,60,90,.2)" : "rgba(220,230,240,.1)"; ctx.fillRect(0, 0, cw, ch);
   } else drops = [];
-  // 8. sky: sunrise, sunset, dusk and night tints; at night warm layered glows, string lights, fireflies
-  const tint = skyTint(hourNow());
-  if (tint[3] > 0.005) { ctx.fillStyle = "rgba(" + Math.round(tint[0]) + "," + Math.round(tint[1]) + "," + Math.round(tint[2]) + "," + tint[3].toFixed(3) + ")"; ctx.fillRect(0, 0, cw, ch); }
+  // 8. sky: sunrise, sunset, dusk and night tints (caves are always dark); warm glows from lamps, windows and farmers
+  if (cave) { ctx.fillStyle = "rgba(8,6,10,.56)"; ctx.fillRect(0, 0, cw, ch); }
+  else { const tint = skyTint(hourNow()); if (tint[3] > 0.005) { ctx.fillStyle = "rgba(" + Math.round(tint[0]) + "," + Math.round(tint[1]) + "," + Math.round(tint[2]) + "," + tint[3].toFixed(3) + ")"; ctx.fillRect(0, 0, cw, ch); } }
   if (night > 0) {
     ctx.globalCompositeOperation = "lighter";
     // festival string lights: from the shop awning to the lamp posts, and along the porch
-    const strings = [[[20, 9.2], [40, 9.2]], [[40, 9.2], [49, 16.2]], [[48, 6.2], [59, 6.2]], [[4, 7.2], [13, 7.2]], [[70, 15.3], [74, 9]]];
+    const strings = farm ? [[[20, 9.2], [40, 9.2]], [[40, 9.2], [49, 16.2]], [[48, 6.2], [59, 6.2]], [[4, 7.2], [13, 7.2]], [[70, 15.3], [74, 9]]] : loc === "town" ? [[[27, 14.2], [45, 14.2]], [[27, 30.2], [45, 30.2]], [[12, 21.2], [24, 21.2]], [[52, 21.2], [64, 21.2]]] : [];
     for (const [[ax, ay], [bx, by]] of strings) {
       const p0 = { x: ox + ax * T + T / 2, y: oy + ay * T }, p1 = { x: ox + bx * T + T / 2, y: oy + by * T };
       const midx = (p0.x + p1.x) / 2, midy = (p0.y + p1.y) / 2 + 22 * SCALE;
@@ -986,25 +1107,28 @@ function renderFrame(now) {
       ctx.fillStyle = g; ctx.fillRect(gx - r, gy - r, 2 * r, 2 * r);
     };
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-      const ch_ = map[y][x];
+      const ch_ = M[y][x];
       if (ch_ === "l") {
         const flick = 0.85 + 0.15 * Math.sin(now / 90 + x * 3 + y);
         glow(ox + x * T + T / 2, oy + y * T + 8 * SCALE, 3.6 * T, 0.55 * night * flick);
         ctx.fillStyle = "rgba(255,220,140," + 0.16 * night + ")"; ctx.beginPath(); ctx.ellipse(ox + x * T + T / 2, oy + y * T + T - 2 * SCALE, 1.6 * T, 0.7 * T, 0, 0, 6.3); ctx.fill();
       }
     }
-    for (const b of buildings) {
-      const rr = Art.roofRowsFor(b.y1 - b.y0 + 1), wy = b.y0 + rr;
-      const cols = b.kind === "W" ? [1, 3, 7, 9] : (b.kind === "S" ? [2, 3, 7, 8] : [4]);
-      for (const cx of cols) {
-        const gx = ox + (b.x0 + cx) * T + T / 2, gy = oy + wy * T + 14 * SCALE;
-        glow(gx, gy, 1.5 * T, 0.35 * night);
-        ctx.fillStyle = "rgba(255,215,130," + 0.12 * night + ")";
-        ctx.beginPath(); ctx.moveTo(gx - 10 * SCALE, oy + (b.y1 + 1) * T); ctx.lineTo(gx + 10 * SCALE, oy + (b.y1 + 1) * T); ctx.lineTo(gx + 22 * SCALE, oy + (b.y1 + 1) * T + 26 * SCALE); ctx.lineTo(gx - 22 * SCALE, oy + (b.y1 + 1) * T + 26 * SCALE); ctx.closePath(); ctx.fill();
-      }
+    for (const b of blds) {
+      if (farm) {
+        const rr = Art.roofRowsFor(b.y1 - b.y0 + 1), wy = b.y0 + rr;
+        const cols = b.kind === "W" ? [1, 3, 7, 9] : (b.kind === "S" ? [2, 3, 7, 8] : [4]);
+        for (const cx of cols) {
+          const gx = ox + (b.x0 + cx) * T + T / 2, gy = oy + wy * T + 14 * SCALE;
+          glow(gx, gy, 1.5 * T, 0.35 * night);
+          ctx.fillStyle = "rgba(255,215,130," + 0.12 * night + ")";
+          ctx.beginPath(); ctx.moveTo(gx - 10 * SCALE, oy + (b.y1 + 1) * T); ctx.lineTo(gx + 10 * SCALE, oy + (b.y1 + 1) * T); ctx.lineTo(gx + 22 * SCALE, oy + (b.y1 + 1) * T + 26 * SCALE); ctx.lineTo(gx - 22 * SCALE, oy + (b.y1 + 1) * T + 26 * SCALE); ctx.closePath(); ctx.fill();
+        }
+      } else for (const [wx, wy] of Art.windowSpots(b.kind, b.x1 - b.x0 + 1, b.y1 - b.y0 + 1)) glow(ox + (b.x0 + wx) * T, oy + (b.y0 + wy) * T, 1.5 * T, 0.35 * night);
     }
-    for (const p of state.players) { if (!p.online || (p.loc || "farm") !== "farm") continue; const v = p.name === prefs.name ? my : viz[p.name]; if (v) glow(ox + v.x * T + T / 2, oy + v.y * T + T / 2, 2.4 * T, 0.22 * night); }
-    if (state.weather === "sun" && season !== "winter") {
+    for (const p of state.players) { if (!p.online || (p.loc || "farm") !== loc) continue; const v = p.name === prefs.name ? my : viz[p.name]; if (v) glow(ox + v.x * T + T / 2, oy + v.y * T + T / 2, (cave ? 5.2 : 2.4) * T, (cave ? 0.6 : 0.22) * night); }
+    if (cave) for (const k in ATL) { const t = ATL[k]; if (!t.o || !/amethyst|emerald|ruby|diamond|prismatic|quartz/.test(t.o)) continue; const [gx, gy] = k.split(",").map(Number); glow(ox + gx * T + T / 2, oy + gy * T + T / 2, 1.2 * T, 0.25 + 0.1 * Math.sin(now / 300 + gx)); }
+    if (!cave && weather === "sun" && season !== "winter") {
       while (fireflies.length < 18) fireflies.push({ x: Math.random() * mapW, y: Math.random() * mapH, p: Math.random() * 6.3 });
       for (const f of fireflies) {
         f.x += (Math.random() - .5) * dt * 1.5; f.y += (Math.random() - .5) * dt * 1.5;
@@ -1019,7 +1143,7 @@ function renderFrame(now) {
     ctx.globalCompositeOperation = "source-over";
   } else fireflies = [];
   // 9. priest bubble, wedding banner and confetti, names and bubbles
-  if (state.priest && state.priest.bubble) drawBubble(ox + state.priest.x * T + T / 2, oy + state.priest.y * T - 20 * SCALE, state.priest.bubble);
+  if (farm && state.priest && state.priest.bubble) drawBubble(ox + state.priest.x * T + T / 2, oy + state.priest.y * T - 20 * SCALE, state.priest.bubble);
   if (wd) {
     if (wd.phase === "married") {
       const bx = ox + (wd.altar[0][0] + 1) * T, by = oy + (wd.altar[0][1] - 4) * T + Math.sin(now / 400) * 3 * SCALE;
@@ -1032,14 +1156,34 @@ function renderFrame(now) {
     if (wd.phase === "married" || wd.phase === "ido") for (const pt of hearts) { ctx.fillStyle = ["#ff7ec8", "#ffd0e8", "#ffe066"][Math.floor(pt.p * 3) % 3]; ctx.fillRect(pt.x, pt.y, 3 * SCALE, 3 * SCALE); ctx.fillRect(pt.x - SCALE, pt.y - SCALE, SCALE, SCALE); ctx.fillRect(pt.x + 3 * SCALE, pt.y - SCALE, SCALE, SCALE); pt.y += pt.v * dt * SCALE / 3; pt.x += Math.sin(now / 500 + pt.p) * 30 * dt; if (pt.y > ch) { pt.y = -10; pt.x = Math.random() * cw; } }
   }
   for (const p of state.players) {
-    if (!p.online || (p.loc || "farm") !== "farm") continue;
+    if (!p.online || (p.loc || "farm") !== loc) continue;
     const v = p.name === prefs.name ? my : viz[p.name]; if (!v) continue;
     const px_ = ox + v.x * T + T / 2, py_ = oy + v.y * T - 16 * SCALE;
     const shirt = COLORS[catalog.player_colors[p.color % catalog.player_colors.length]] || "#f4f1ea";
     if (p.bubble) drawSpeech(px_, py_ - 3 * SCALE, p.bubble, shirt);
     else if (p.name !== prefs.name) drawTag(px_, py_ - 2 * SCALE, p.name);
   }
+  drawBanner(now, cw);
   if (Math.floor(now / 1000) !== Math.floor((now - dt * 1000) / 1000)) $("#clock").textContent = skyLabel(hourNow());
+}
+const _areaBld = {};
+function areaBuildings(loc) {
+  if (!_areaBld[loc]) _areaBld[loc] = ((catalog.buildings || {})[loc] || []).map((b) => ({ kind: b.kind, label: b.label, x0: b.x, y0: b.y, x1: b.x + b.w - 1, y1: b.y + b.h - 1 }));
+  return _areaBld[loc];
+}
+function drawBanner(now, cw) {
+  /* the name of a place, in a little wooden card at the top of the screen, when you walk into it */
+  if (!areaBanner) return;
+  const t = (now - areaBanner.at) / 1000;
+  if (t > 3) { areaBanner = null; return; }
+  const a = t < 0.3 ? t / 0.3 : t > 2.4 ? Math.max(0, (3 - t) / 0.6) : 1;
+  ctx.save(); ctx.globalAlpha = a;
+  ctx.font = "600 " + 9 * SCALE + "px 'Pixelify Sans', 'Trebuchet MS', sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const w = ctx.measureText(areaBanner.text).width + 24 * SCALE, h = 16 * SCALE, x = cw / 2 - w / 2, y = 34 * SCALE + (t < 0.3 ? (1 - t / 0.3) * -10 * SCALE : 0);
+  ctx.fillStyle = "#3a2a1a"; ctx.fillRect(x - SCALE, y - SCALE, w + 2 * SCALE, h + 2 * SCALE);
+  ctx.fillStyle = "#f2e3bf"; ctx.fillRect(x, y, w, h); ctx.fillStyle = "#c9b283"; ctx.fillRect(x, y + h - SCALE, w, SCALE);
+  ctx.fillStyle = "#3a2a1a"; ctx.fillText(areaBanner.text, cw / 2, y + h / 2 + SCALE / 2);
+  ctx.restore();
 }
 function hudPads() {
   // Screen-space bands (device px) covered by the HUD, so the camera keeps the farmer in the uncovered part of the canvas.
@@ -1079,6 +1223,16 @@ function renderInterior(now, dt) {
   for (let y = 0; y < mapH; y++) for (let x = 0; x < mapW; x++) {
     const c = rows[y][x];
     if ("btcfFkpSqhox".includes(c)) { const spr = Art.interiorObj(c, fr, hash(x + 3, y + 5) % 6); if (spr) ents.push({ y: y + (c === "x" || c === "r" ? 0 : 0.5), draw: () => ctx.drawImage(spr, ox + x * T, oy + y * T, T, T) }); }
+    else if ("dai".includes(c)) { const spr = Art.interiorExtra(c, hash(x, y)); ents.push({ y: y + 0.5, draw: () => ctx.drawImage(spr, ox + x * T, oy + y * T, T, T) }); }
+    else if (c === "n") {
+      // the person who works here, standing behind their own stretch of counter when there is one
+      const who = (catalog.keepers || {})[loc], look = (catalog.npcs || {})[who] || ["boy", "white", "none"], counter = rows[y][x - 1] === "S" || rows[y][x + 1] === "S";
+      ents.push({ y: y + 0.5, draw: () => {
+        const sx = ox + x * T, sy = oy + y * T, bob = Math.floor(now / 900 + x) % 2;
+        ctx.drawImage(charSprite(look[0], "down", 0, COLORS[look[1]], look[2]), sx, sy - (16 + bob) * SCALE, T, 48 * SCALE);
+        if (counter) { const cs = Art.interiorObj("S", fr, hash(x + 3, y + 5) % 6); if (cs) ctx.drawImage(cs, sx, sy, T, T); }
+      } });
+    }
   }
   for (const p of state.players) {
     if (!p.online || (p.loc || "farm") !== loc) continue;
@@ -1088,7 +1242,7 @@ function renderInterior(now, dt) {
   }
   ents.sort((a, b) => a.y - b.y).forEach((e) => e.draw());
   const meP = myPlayer();
-  if (meP) { const fx = meP.x + meP.facing[0], fy = meP.y + meP.facing[1], c = (rows[fy] || "")[fx]; if (c && "btcfFkpSqhoxW".includes(c)) { ctx.strokeStyle = "rgba(255,250,200," + (0.35 + 0.3 * Math.sin(now / 200)) + ")"; ctx.lineWidth = SCALE; ctx.strokeRect(ox + fx * T + 2 * SCALE, oy + fy * T + 2 * SCALE, T - 4 * SCALE, T - 4 * SCALE); } }
+  if (meP) { const fx = meP.x + meP.facing[0], fy = meP.y + meP.facing[1], c = (rows[fy] || "")[fx]; if (c && "btcfFkpSqhoxWndai".includes(c)) { ctx.strokeStyle = "rgba(255,250,200," + (0.35 + 0.3 * Math.sin(now / 200)) + ")"; ctx.lineWidth = SCALE; ctx.strokeRect(ox + fx * T + 2 * SCALE, oy + fy * T + 2 * SCALE, T - 4 * SCALE, T - 4 * SCALE); } }
   // warm lamp light and a soft vignette
   const g = ctx.createRadialGradient(ox + mapW * T / 2, oy + mapH * T / 2, T, ox + mapW * T / 2, oy + mapH * T / 2, Math.max(mapW, mapH) * T);
   g.addColorStop(0, "rgba(255,200,120,0)"); g.addColorStop(1, "rgba(20,10,0,.45)"); ctx.fillStyle = g; ctx.fillRect(0, 0, cw, ch);

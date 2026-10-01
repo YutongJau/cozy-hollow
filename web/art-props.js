@@ -762,4 +762,5 @@ function rareTreeSprite(kind, stage, season) {
 }
 
 Object.assign(window.ART, { fenceSprite, gateSprite, lilyPad, propSprite, puff, treeSprite, bushSprite, youngTree , chestSprite, rareTreeSprite });
+window.ART.PH = { trunk, rock, barrel, bench, lamp, signpost, stump, woodpile, crate, hayBale, well, flowers, blossomBush, oval, disc, speckle };
 })();

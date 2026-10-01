@@ -86,7 +86,7 @@ this account, with the command to join. Add a message if you like:
 | --- | --- |
 | arrows / WASD | walk |
 | **E** or Space | use what you hold on the tile ahead of you (or under you): the **hoe** tills grass, **seeds** plant, the **watering can** waters, the **scythe** harvests (bare hands harvest too), the **axe** chops trees you planted, the **pickaxe** undoes soil and lifts sprinklers, the **fishing rod** casts at the pond. Facing the shop, bin, board, well, mailbox or a fruit tree uses those. |
-| **F** | fish, when facing the pond. Keep the fish inside your net with left/right until the bar fills. |
+| **F** | fish, when facing water (pond, river, lake or sea). Keep the fish inside your net with left/right until the bar fills. |
 | **X** | clear the tile you stand on (dig up a crop, remove soil, pick up a sprinkler); facing the storage chest, pick it up. While carrying it, **E** or **X** sets it down on the tile ahead. |
 | **1-9**, Tab | choose a tool or item from your tool bar; **I** opens your whole bag. Hold seeds and they go up over your head, ready to plant. |
 | **T** | chat (speech bubbles!). `/` starts a command. |
@@ -133,6 +133,44 @@ simpler look.
   together.
 * Nights are darker with fireflies; rain and snow fall over the map.
 
+### The valley beyond the farm
+
+Paths lead off the farm in three directions, and each place has its own
+things to find. Walk onto a path at the edge of a map to go on.
+
+* **Hollow Town** (west of the farm): a fountain square with four little
+  lawns, shops along the north street and folks to talk to. The **Mercantile**
+  (Bram sells the same seeds as Marigold), the **Saloon** (Rusty), the **Town
+  Hall** with its clock tower (Mayor Hazel), the **Museum** (Professor Fern),
+  the **Clinic** (Doc Alder), the **Bakery** (Juniper), the **Post Office**
+  (Pip hands you a letter), the **Blacksmith** (Ingrid), the **Carpenter**
+  (Oakley), cottages, a graveyard, a little park, a river with a bridge and a
+  notice board. Walk into a door to go in, press E facing someone to talk.
+  The **stagecoach** at the west end rides to Dusty Gulch.
+* **Summit Ridge** (north of the farm, or north out of town): cliffs, pines,
+  a lake with a fishing dock, a quarry full of rocks and the adventurers'
+  **Guild**. The **Mine** is cut into the cliff: three cave levels joined by
+  ladders. Hold the pickaxe and press E on rocks for stone, copper, iron and
+  gold ore, quartz and gems (amethyst, emerald, ruby, diamond, and a very rare
+  prismatic shard). Rocks come back every few minutes.
+* **Whisperwood** (south of the farm): deep woods, a river with a plank
+  bridge, a lily pond, the **Ranger** cabin and a hidden grove in the
+  north-east. Morels, fiddleheads, berries and nuts.
+* **Driftwood Beach** (south of town, or west out of the forest): sand, tide
+  pools, driftwood, the **Fish Shop** (Old Tomas) and the **Lighthouse**
+  (Wren). Shells, clams, coral and urchins wash up; ocean fish bite off the
+  pier. The **boat** at the end of the pier sails to Palm Isle.
+* **Palm Isle**: a jungle island with palms, a smoking volcano and Coco's
+  **Tiki Hut**. Coconuts and ginger, tropical fish.
+* **Dusty Gulch**: a frontier town in a red-rock canyon with a General store,
+  the Gilded Spur **saloon** (Dolly), the **Bank**, the **Sheriff**, a stable
+  and a cattle pen. Cactus fruit and desert sage grow wild, and if you fish
+  the creek you might pan out a **gold nugget**.
+
+Everything you find sells at the shipping bin. Exploring, mining, gems and
+rides all have milestones in the journal. When the host updates the game,
+browser tabs reload by themselves.
+
 ## Managing the farm
 
 ```bash
@@ -158,4 +196,5 @@ To play across two machines instead of one, run
 * `client.py` — the curses interface
 * `server.py` — the farm server (auto-started in the background)
 * `world.py` — items, crops, map, growth rules shared by both
+* `areas.py` — the town, forest, beach, mountain, mine, island and frontier maps, buildings and people
 * `pingall.py` / `ping@all` — say hi on all of this account's terminals
