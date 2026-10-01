@@ -210,6 +210,24 @@ browser tabs reload by themselves.
 * **Reshaping the farm**: the landscaping shovel digs ponds and rivers and
   fills them back in; lay path stones and build bridges.
 
+## Claude, the AI farmer
+
+```bash
+python3 farm.py claude
+```
+
+brings in **Claude**, an AI who plays alongside you as a regular farmer: he joins over the same connection any
+player uses, shows up in the farmers list, walks the valley, tends and sells crops, fishes, forages, mines, chats
+with the villagers, plays the festival games and follows friends around. Talk to him in chat ("claude, come with
+me!") and he answers. He's a laid-back guy in shades and a coral bomber jacket, drawn with a sprite of his own.
+
+He thinks with **Claude Haiku 4.5**, the lightest Claude model, through the `claude` command-line tool once it is
+logged in (`claude auth login`), or through the API if the `anthropic` package is installed and `ANTHROPIC_API_KEY`
+is set. He only asks the model when someone is online to play with (at most every few seconds, capped per hour);
+with nobody around, or with no Claude login, a built-in autopilot keeps him farming. `python3 farm.py claude status`
+shows what he's thinking with and what he's up to; `python3 farm.py claude stop` sends him home. Coins are shared,
+so he spends sparingly (a few seeds when the farm has plenty).
+
 ## Managing the farm
 
 ```bash

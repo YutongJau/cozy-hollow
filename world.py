@@ -91,6 +91,8 @@ MAX_TREE_FRUIT = 3
 
 PLAYER_COLORS = ["cyan", "magenta", "yellow", "green", "red", "blue", "white", "orange", "pink"]
 SPRITES = ["boy", "girl"]
+OWN_LOOKS = ["claude"]
+SKY_SHIFT = float(os.environ.get("COZY_SKY_SHIFT", "0") or 0)    # testing only: move the sky clock (seconds) on a throwaway server       # farmers with a look of their own, drawn by the browser's art (Claude, the AI farmer)
 TITLES = ["Sprout", "Seedling", "Grower", "Green Thumb", "Harvest Hand",
           "Farm Boss", "Valley Legend"]
 
@@ -713,7 +715,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
 
     def sky_hour(self, t):
         """In-game hour 0..24 for the sky: sunrise, day, sunset, night."""
-        return ((t + 6 * 60) % SKY_DAY) / SKY_DAY * 24.0
+        return ((t + 6 * 60 + SKY_SHIFT) % SKY_DAY) / SKY_DAY * 24.0
 
     def weather_at(self, t):
         bucket = int(t // (2 * HOUR))
@@ -1361,7 +1363,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
             self.event("%s arrived at the farm for the first time! Welcome!" % name, now, "good")
         else:
             self.event("%s is back in the valley." % name, now)
-        if sprite in SPRITES:
+        if sprite in SPRITES or sprite in OWN_LOOKS:
             p["sprite"] = sprite
         p.setdefault("sprite", "boy")
         if color in PLAYER_COLORS:

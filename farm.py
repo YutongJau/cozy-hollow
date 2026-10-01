@@ -10,6 +10,7 @@
     python3 farm.py ping [message]  say "hi" on every terminal of this account
     python3 farm.py status          is the farm running? who is online?
     python3 farm.py stop            stop the background server (the farm is saved)
+    python3 farm.py claude          Claude, an AI farmer, joins and plays (claude stop / claude status)
     python3 farm.py reset           start a brand-new farm (asks for confirmation)
     python3 farm.py server          run the server in the foreground (for debugging)
 
@@ -506,6 +507,8 @@ def cmd_status(args):
             print("Public link for friends anywhere: %s" % public)
         elif tunnel_alive(args.save):
             print("The public link expired and a new one is being made; check again in a minute.")
+    pid = claude_pid(args.save)
+    print("Claude, the AI farmer: %s" % (("playing, thinking with %s" % claude_brain_line(args.save)) if pid else "not playing (python3 farm.py claude)"))
     if os.path.exists(args.save):
         try:
             with open(args.save) as f:
@@ -521,6 +524,85 @@ def cmd_status(args):
             print("Could not read the save file:", e)
     else:
         print("No farm has been created yet.")
+    return 0
+
+
+def claude_files(save):
+    d = os.path.dirname(save)
+    return os.path.join(d, "claude.pid"), os.path.join(d, "claude.log")
+
+
+def claude_pid(save):
+    pidf, _ = claude_files(save)
+    try:
+        pid = int(open(pidf).read().strip())
+        os.kill(pid, 0)
+        return pid
+    except (OSError, ValueError):
+        return None
+
+
+def claude_brain_line(save):
+    """What Claude is thinking with, from the first lines of his log."""
+    _, logf = claude_files(save)
+    try:
+        for line in open(logf).read().splitlines()[-400:][::-1]:
+            if "brain:" in line:
+                return line.split("brain:", 1)[1].strip()
+    except OSError:
+        pass
+    return "?"
+
+
+def cmd_claude(args):
+    """Claude, the AI farmer: `claude` (start), `claude stop`, `claude status`. He plays as a regular player."""
+    rest = list(args.rest or [])
+    sub = next((r for r in rest if not r.startswith("-")), "start")
+    brain = rest[rest.index("--brain") + 1] if "--brain" in rest and rest.index("--brain") + 1 < len(rest) else "auto"
+    pidf, logf = claude_files(args.save)
+    pid = claude_pid(args.save)
+    if sub == "stop":
+        if not pid:
+            print("Claude isn't playing right now.")
+            return 0
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except OSError:
+            os.kill(pid, signal.SIGTERM)
+        os.remove(pidf)
+        print("Claude headed home. (python3 farm.py claude brings him back.)")
+        return 0
+    if sub == "status":
+        if pid:
+            print("Claude is playing (pid %d), thinking with: %s" % (pid, claude_brain_line(args.save)))
+            try:
+                print("".join(open(logf).readlines()[-8:]), end="")
+            except OSError:
+                pass
+        else:
+            print("Claude isn't playing right now. Start him with: python3 farm.py claude")
+        return 0
+    if pid:
+        print("Claude is already playing (thinking with: %s). `python3 farm.py claude stop` sends him home." % claude_brain_line(args.save))
+        return 0
+    if not ensure_server(args):
+        return 1
+    host = "127.0.0.1" if args.host in ("0.0.0.0", "localhost") else args.host
+    os.makedirs(os.path.dirname(pidf), exist_ok=True)
+    log = open(logf, "a")
+    proc = subprocess.Popen([sys.executable, "-u", os.path.join(HERE, "claudebot.py"), "--host", host, "--port", str(args.port), "--brain", brain],
+                            cwd=HERE, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+    open(pidf, "w").write(str(proc.pid))
+    time.sleep(3)
+    if proc.poll() is not None:
+        print("Claude couldn't start. See %s" % logf)
+        return 1
+    brain_now = claude_brain_line(args.save)
+    print("Claude joined the farm as a player (thinking with: %s)." % brain_now)
+    if brain_now == "autopilot":
+        print("To let him think with Claude Haiku 4.5, log the claude command-line tool in once (`claude auth login`),")
+        print("or `pip install anthropic` and set ANTHROPIC_API_KEY; then `python3 farm.py claude stop` and start him again.")
+    print("Log: %s   Stop him: python3 farm.py claude stop" % logf)
     return 0
 
 
@@ -606,8 +688,8 @@ def main():
     ap = argparse.ArgumentParser(description="Cozy Hollow - a shared terminal farm",
                                  formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
     ap.add_argument("command", nargs="?", default="play",
-                    choices=["play", "web", "share", "unshare", "ping", "status", "stop", "reset", "server", "tunnel"])
-    ap.add_argument("rest", nargs=argparse.REMAINDER, help="message for ping")
+                    choices=["play", "web", "share", "unshare", "ping", "status", "stop", "reset", "server", "tunnel", "claude"])
+    ap.add_argument("rest", nargs=argparse.REMAINDER, help="message for ping; for claude: start | stop | status [--brain auto|cli|api|autopilot]")
     ap.add_argument("--name", help="your farmer name")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
@@ -621,13 +703,24 @@ def main():
     ap.add_argument("--unicode", action="store_true", help="force unicode graphics")
     args = ap.parse_args()
     argv = sys.argv[1:]
-    if args.command != "ping" and args.rest and args.command in argv:
+    if args.command == "claude" and args.rest and "claude" in argv:
+        # `claude [start|stop|status] [--brain X]` takes its own words; every other flag is the farm's own (--port, --save...)
+        i = argv.index("claude")
+        tail, words = argv[i + 1:], []
+        if "--brain" in tail:
+            j = tail.index("--brain")
+            words, tail = tail[j:j + 2], tail[:j] + tail[j + 2:]
+        words = [t for t in tail if t in ("start", "stop", "status")] + words
+        tail = [t for t in tail if t not in ("start", "stop", "status")]
+        args = ap.parse_args(argv[:i] + tail + ["claude"])
+        args.rest = words
+    elif args.command not in ("ping", "claude") and args.rest and args.command in argv:
         # the ping-message catch-all swallows flags written after the command; parse them as flags
         i = argv.index(args.command)
         args = ap.parse_args(argv[:i] + argv[i + 1:] + [args.command])
     fn = {"play": cmd_play, "web": cmd_web, "share": cmd_share, "unshare": cmd_unshare, "ping": cmd_ping,
           "status": cmd_status, "stop": cmd_stop, "reset": cmd_reset, "server": cmd_server,
-          "tunnel": cmd_tunnel}[args.command]
+          "tunnel": cmd_tunnel, "claude": cmd_claude}[args.command]
     sys.exit(fn(args) or 0)
 
 

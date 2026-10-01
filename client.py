@@ -846,7 +846,9 @@ class Client:
             sy, sx = oy + y - cam_y, ox + x - cam_x
             if kind == "npc":
                 attr = (P(C256.get(extra, 255), bgfn(x, y)) if rich else P(extra if extra in FG else "white")) | B
-                self.put(sy, sx, self.g(NPC_GLYPH), attr)
+                words = name.split()                  # everyone shows their own initial: Hazel H, Fern F, Gus G...
+                initial = (words[-1] if len(words) > 1 and words[0] in ("Mayor", "Professor", "Doc", "Old", "Ranger", "Captain", "Mr.", "Sheriff", "Prospector", "Granny") else words[0])[0]
+                self.put(sy, sx, initial, attr | curses.A_UNDERLINE)
                 if bubble:
                     labels.append((sy, sx, bubble, attr | curses.A_REVERSE))
                 elif near(x, y):
@@ -1346,7 +1348,7 @@ class Client:
                 glyph, fg_role, bg_role = cell
                 cx, cy = x - 1 + i, y - 1 + row
                 if glyph == FACE:
-                    glyph = eyes
+                    glyph = "\u25ac" if p.get("sprite") == "claude" else eyes     # Claude's shades
                 fg = self.sprite_colour(fg_role, p, cx, cy, night)
                 bg = self.sprite_colour(bg_role, p, cx, cy, night)
                 attr = P(fg, bg)

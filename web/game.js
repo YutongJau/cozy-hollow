@@ -56,6 +56,7 @@ let lastDir = null;
 const prefs = { name: localStorage.getItem("cozy.name") || "", sprite: localStorage.getItem("cozy.sprite") || "girl",
   color: localStorage.getItem("cozy.color") || "pink", hat: localStorage.getItem("cozy.hat") || "cowboy" };
 const cowViz = {};            // cow id -> {x, y, tx, ty, f}
+let balloonViz = {};          // the floating present, glided between server ticks
 const fxs = [];               // objects in flight: lifted off a tile into someone's hands, or dropped onto one
 const npcViz = {}, mobViz = {}, critViz = {}, petViz = {}, compViz = {}, chickViz = {};   // things that glide between tiles
 const shots = [], poofs = [], stars = [];
@@ -196,15 +197,15 @@ function handle(m) {
       if (p.name === prefs.name) { reconcile(p, now); continue; }
       const v = viz[p.name] || (viz[p.name] = { x: p.x, y: p.y, tx: p.x, ty: p.y, dist: 0, facing: "down", moving: false, loc: p.loc });
       if (v.loc !== (p.loc || "farm")) { v.loc = p.loc || "farm"; v.x = v.tx = p.x; v.y = v.ty = p.y; }
-      if (v.tx !== p.x || v.ty !== p.y) { v.tx = p.x; v.ty = p.y; }
+      aim(v, p.x, p.y, now);
       v.facing = facingName(p.facing);
     }
     for (const cw of m.cows || []) {
       const v = cowViz[cw.id] || (cowViz[cw.id] = { x: cw.x, y: cw.y, tx: cw.x, ty: cw.y, f: cw.f });
-      v.tx = cw.x; v.ty = cw.y; v.f = cw.f;
+      aim(v, cw.x, cw.y, now); v.f = cw.f;
     }
     applyWorld(m);
-    const glide = (store, key, e, loc) => { const v = store[key] || (store[key] = { x: e.x, y: e.y, tx: e.x, ty: e.y, loc, dist: 0 }); if (v.loc !== loc) { v.loc = loc; v.x = v.tx = e.x; v.y = v.ty = e.y; } v.tx = e.x; v.ty = e.y; v.seen = now; return v; };
+    const glide = (store, key, e, loc) => { const v = store[key] || (store[key] = { x: e.x, y: e.y, tx: e.x, ty: e.y, loc, dist: 0 }); if (v.loc !== loc) { v.loc = loc; v.x = v.tx = e.x; v.y = v.ty = e.y; } aim(v, e.x, e.y, now); v.seen = now; return v; };
     for (const n of m.npcs || []) { const v = glide(npcViz, n.n, n, n.loc); v.f = n.f; v.b = n.b; }
     for (const c of m.chickens || []) { const v = glide(chickViz, c.id, c, "farm"); v.f = c.f; }
     for (const pt of m.pets || []) { const v = glide(petViz, pt.owner, pt, pt.loc); v.f = pt.f; }
@@ -259,7 +260,10 @@ function reconcile(p, now) {
     return;
   }
   const stale = now - my.lastSend < 350;          // our latest step may not be in this snapshot yet
-  if ((p.x !== my.tx || p.y !== my.ty) && !stale) { my.x = my.tx = p.x; my.y = my.ty = p.y; my.stepping = false; }
+  if ((p.x !== my.tx || p.y !== my.ty) && !stale) {
+    my.tx = p.x; my.ty = p.y;
+    if (Math.hypot(my.x - p.x, my.y - p.y) > 2) { my.x = p.x; my.y = p.y; my.stepping = false; } else my.stepping = true;
+  }
   if (!held.size && !my.stepping) my.dir = facingName(p.facing);
 }
 function facingName(f) { if (f[1] > 0) return "down"; if (f[1] < 0) return "up"; return f[0] < 0 ? "left" : "right"; }
@@ -817,15 +821,18 @@ canvas.addEventListener("click", (e) => {
 function updateSelf(dt, now) {
   if (!my.ready) return;
   if (state && state.wedding) { my.stepping = false; return; }
-  if (my.stepping) {
-    const mp = myPlayer(), boost = (mp && mp.riding ? 1.8 : 1) * (me && me.buffs && me.buffs.speed > 0 ? 1.3 : 1);
-    const sp = WALK_SPEED * boost * dt, dx = my.tx - my.x, dy = my.ty - my.y, dist = Math.hypot(dx, dy);
-    if (dist <= sp) { my.x = my.tx; my.y = my.ty; my.stepping = false; my.dist += dist; }
-    else { my.x += dx / dist * sp; my.y += dy / dist * sp; my.dist += sp; }
-  }
-  if (!my.stepping && mode === "play") {
-    if (held.size) { my.queued = null; tryStep((lastDir && held.has(lastDir)) ? lastDir : Array.from(held).pop(), now); }
-    else if (my.queued) { const d = my.queued; my.queued = null; tryStep(d, now); }
+  const mp = myPlayer(), boost = (mp && mp.riding ? 1.8 : 1) * (me && me.buffs && me.buffs.speed > 0 ? 1.3 : 1);
+  let budget = WALK_SPEED * boost * dt;
+  for (let i = 0; i < 3; i++) {
+    if (!my.stepping) {
+      if (mode !== "play") break;
+      if (held.size) { my.queued = null; tryStep((lastDir && held.has(lastDir)) ? lastDir : Array.from(held).pop(), now); }
+      else if (my.queued) { const d = my.queued; my.queued = null; tryStep(d, now); }
+      if (!my.stepping || budget <= 0) break;
+    }
+    const dx = my.tx - my.x, dy = my.ty - my.y, dist = Math.hypot(dx, dy);
+    if (dist <= budget) { my.x = my.tx; my.y = my.ty; my.stepping = false; my.dist += dist; budget -= dist; }
+    else { my.x += dx / dist * budget; my.y += dy / dist * budget; my.dist += budget; budget = 0; break; }
   }
 }
 function tryStep(dir, now = performance.now()) {
@@ -887,15 +894,9 @@ function renderFrame(now) {
   if (mode === "fish") updateFishing(dt);
   if (!state || !map.length) return;
   updateSelf(dt, now);
-  for (const name in viz) {
-    const v = viz[name], sp = WALK_SPEED * dt, dx = v.tx - v.x, dy = v.ty - v.y, dist = Math.hypot(dx, dy);
-    if (dist > 2.5) { v.x = v.tx; v.y = v.ty; }
-    else if (dist <= sp) { v.x = v.tx; v.y = v.ty; v.dist += dist; }
-    else { v.x += dx / dist * sp; v.y += dy / dist * sp; v.dist += sp; }
-    v.moving = dist > 0.001;
-  }
-  glideAll(npcViz, 2.2, dt); glideAll(chickViz, 2.6, dt); glideAll(petViz, WALK_SPEED * 1.1, dt); glideAll(compViz, WALK_SPEED * 1.1, dt);
-  glideAll(mobViz, 4.5, dt); glideAll(critViz, 5, dt);
+  glideAll(viz, WALK_SPEED * 0.9, dt); glideAll(npcViz, 1.6, dt); glideAll(chickViz, 2.2, dt); glideAll(petViz, WALK_SPEED, dt); glideAll(compViz, WALK_SPEED, dt);
+  glideAll(mobViz, 1.8, dt); glideAll(critViz, 2.5, dt); glideAll(cowViz, 0.9, dt);
+  if (state.balloon) { const b = state.balloon, v = balloonViz.id === b.id ? balloonViz : (balloonViz = { id: b.id, x: b.x, y: b.y, tx: b.x, ty: b.y }); aim(v, b.x, b.y, now); glide1(v, 0.2, dt); }
   updateHudLive(now);
   const loc = curLoc();
   if (!isOutdoor(loc)) { renderInterior(now, dt); return; }
@@ -1094,9 +1095,7 @@ function renderFrame(now) {
   }
   if (farm) for (const cw of state.cows || []) {
     const v = cowViz[cw.id]; if (!v) continue;
-    // the server moves a walking cow one tile per second, so glide at just over a tile a second and she never jumps
-    const sp = 1.12 * dt, dx = v.tx - v.x, dy = v.ty - v.y, dist = Math.hypot(dx, dy);
-    if (dist > 2.5) { v.x = v.tx; v.y = v.ty; } else if (dist <= sp) { v.x = v.tx; v.y = v.ty; } else { v.x += dx / dist * sp; v.y += dy / dist * sp; }
+    const dist = Math.hypot(v.tx - v.x, v.ty - v.y);                       // cows glide in renderFrame like everything else
     const moving = dist > 0.02 || !!cw.w;
     if (v.x + 1 < x0 || v.x > x1 + 1 || v.y + 1 < y0 || v.y > y1 + 1) continue;
     ents.push({ y: v.y + 0.9, draw: () => {
@@ -1471,13 +1470,22 @@ function drawTool(sw, sx, sy, facing, now) {
   ctx.restore();
 }
 // ------------------------------------------------------------------ life in the valley: drawing helpers
-function glideAll(store, speed, dt) {
-  for (const k in store) {
-    const v = store[k], dx = v.tx - v.x, dy = v.ty - v.y, d = Math.hypot(dx, dy), sp = speed * dt;
-    if (d > 3) { v.x = v.tx; v.y = v.ty; } else if (d <= sp) { v.x = v.tx; v.y = v.ty; v.dist += d; } else { v.x += dx / d * sp; v.y += dy / d * sp; v.dist += sp; }
-    v.moving = d > 0.01;
-  }
+function aim(v, tx, ty, now) {
+  /* a new position from the server: remember how often they come, so the glide can arrive just as the next one does
+     (a villager stepping every 0.55s walks one smooth tile per 0.55s instead of dashing and waiting) */
+  if (v.tx === tx && v.ty === ty) return;
+  if (v.lastAim) { const iv = Math.min(1.2, Math.max(0.08, (now - v.lastAim) / 1000)); v.iv = v.iv ? v.iv * 0.7 + iv * 0.3 : iv; }
+  v.lastAim = now; v.tx = tx; v.ty = ty;
 }
+function glide1(v, minSpeed, dt) {
+  const dx = v.tx - v.x, dy = v.ty - v.y, d = Math.hypot(dx, dy);
+  if (d > 3) { v.x = v.tx; v.y = v.ty; v.moving = false; return; }            // teleported (a door, a respawn): no slide across the map
+  const sp = Math.max(minSpeed, d / Math.max(0.12, v.iv || 0.3) * 1.04) * dt;
+  if (d <= sp) { v.x = v.tx; v.y = v.ty; v.dist = (v.dist || 0) + d; } else { v.x += dx / d * sp; v.y += dy / d * sp; v.dist = (v.dist || 0) + sp; }
+  v.still = d > 0.01 ? 0 : (v.still || 0) + dt;
+  v.moving = v.still < 0.15;                         // keep walking through the blink between two steps (no flicker to the standing pose)
+}
+function glideAll(store, minSpeed, dt) { for (const k in store) glide1(store[k], minSpeed, dt); }
 function readyBubble(sx, sy, key, now) {
   /* a little thought bubble with the finished thing in it, bobbing over a machine or a hen */
   const b = Math.round(Math.sin(now / 280) * 2) * SCALE, x = sx + T / 2, y = sy - 10 * SCALE + b, r = 9 * SCALE;
@@ -1506,7 +1514,8 @@ function drawPet(pt, v, ox, oy, now) {
   const f = pt.f || [0, 1], facing = facingName(f), fr = v.moving ? 1 + Math.floor(now / 120) % 3 : 0;
   const sx = Math.round(ox + v.x * T), sy = Math.round(oy + v.y * T);
   ctx.fillStyle = "rgba(0,0,0,.18)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, sy + T - 3 * SCALE, 10 * SCALE, 3 * SCALE, 0, 0, 6.3); ctx.fill();
-  ctx.drawImage(Art.petSprite(pt.kind, facing, fr), sx, sy - 4 * SCALE, T, T);
+  const coats = (Art.PET_COATS || {})[pt.kind] || [""]; let h = 0; for (const ch of pt.name || "") h = (h * 31 + ch.charCodeAt(0)) >>> 0;   // every pet its own coat
+  ctx.drawImage(Art.petSprite(pt.kind, facing, fr, coats[h % coats.length]), sx, sy - 4 * SCALE, T, T);
 }
 function drawMob(kind, v, ox, oy, now, hp, tame, hurt) {
   const big = kind === "slime_king", size = big ? 48 * SCALE : T, flying = kind === "bat" || kind === "ghost";
@@ -1526,8 +1535,8 @@ function drawMob(kind, v, ox, oy, now, hp, tame, hurt) {
 }
 function drawNpc(name, v, ox, oy, now) {
   const look = (catalog.npcs || {})[name] || ["boy", "white", "none"], f = v.f || [0, 1];
-  const ci = Math.max(0, (catalog.player_colors || []).indexOf(look[1]));
-  drawFarmer({ name, color: ci, sprite: look[0], hat: look[2], facing: f }, v.x, v.y, facingName(f), v.moving ? 1 + Math.floor(v.dist * 4) % 7 : 0, ox, oy, now, null);
+  const ci = Math.max(0, (catalog.player_colors || []).indexOf(look[1])), own = Art.LOOKS && Art.LOOKS[name];   // everyone has a look of their own
+  drawFarmer({ name, color: ci, sprite: own ? name : look[0], hat: own ? "none" : look[2], facing: f }, v.x, v.y, facingName(f), v.moving ? 1 + Math.floor(v.dist * 4) % 7 : 0, ox, oy, now, null);
   const px_ = ox + v.x * T + T / 2, py_ = oy + v.y * T - 18 * SCALE;
   if (v.b) drawBubble(px_, py_ - 2 * SCALE, v.b);
   else if (my.ready && Math.abs(my.x - v.x) + Math.abs(my.y - v.y) < 3.5) drawTag(px_, py_, name);
@@ -1568,7 +1577,7 @@ function festivalDecor(kind, ents, ox, oy, now) {
 }
 function drawFlying(loc, ox, oy, now) {
   // a present floating by on a balloon
-  const b = state.balloon;
+  const b0 = state.balloon, b = b0 && balloonViz.id === b0.id ? { loc: b0.loc, x: balloonViz.x, y: balloonViz.y + Math.sin(now / 700) * 0.08 } : b0;
   if (b && b.loc === loc) {
     const sx = ox + b.x * T, sy = oy + (b.y - 3) * T;
     ctx.fillStyle = "rgba(0,0,0,.12)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, oy + b.y * T + T - 2 * SCALE, 9 * SCALE, 3 * SCALE, 0, 0, 6.3); ctx.fill();
@@ -1628,7 +1637,8 @@ function hatIcon(k) {
 function npcIcon(name) {
   const look = (catalog.npcs || {})[name] || ["boy", "white", "none"];
   const c = document.createElement("canvas"); c.width = 32; c.height = 32; const g = c.getContext("2d"); g.imageSmoothingEnabled = false;
-  g.drawImage(charSprite(look[0], "down", 0, COLORS[look[1]] || "#ccc", look[2]), 0, 0, 32, 32, 0, 2, 32, 32);
+  const own = Art.LOOKS && Art.LOOKS[name];
+  g.drawImage(charSprite(own ? name : look[0], "down", 0, COLORS[look[1]] || "#ccc", own ? "none" : look[2]), 0, 0, 32, 32, 0, 2, 32, 32);
   return c;
 }
 function sprIcon(spr) { const c = document.createElement("canvas"); c.width = 32; c.height = 32; const g = c.getContext("2d"); g.imageSmoothingEnabled = false; g.drawImage(spr, 0, 0, 32, 32); return c; }

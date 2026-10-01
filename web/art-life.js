@@ -23,62 +23,114 @@ function chickenSprite(color, frame) {
     ell(g, 16, 20, 5, 3, d); px(g, 13, 18, 6, 1, lt(c, 0.3));
     const hx = peck ? 23 : 21, hy = peck ? 18 : 10;
     body(g, hx, hy, 4, 4, c); px(g, hx - 1, hy - 6, 4, 3, "#e0402f"); px(g, hx, hy - 7, 2, 1, "#e0402f");
-    px(g, hx + 4, hy, 3, 2, "#f2a33a"); px(g, hx + 1, hy + 3, 2, 3, "#e0402f"); dot(g, hx + 1, hy - 1, OUT);
+    px(g, hx + 4, hy, 3, 2, "#f2a33a"); px(g, hx + 1, hy + 3, 2, 3, "#e0402f"); px(g, hx + 1, hy - 2, 2, 2, OUT); dot(g, hx + 1, hy - 2, "#ffffff"); dot(g, hx - 1, hy + 1, "#f4a0a8");
     outline(cv, OUT);
   });
 }
 
-// ------------------------------------------------------------------ pets: dog and cat, four facings, a 4-frame trot
-const PETS = { dog: { c: "#c98a4a", d: "#8a5a2a", l: "#e8b880", ear: "#7a4a22" }, cat: { c: "#9a9aa4", d: "#6a6a74", l: "#c8c8d0", ear: "#7a7a84" } };
-function petSprite(kind, facing, frame) {
-  const P = PETS[kind] || PETS.dog;
-  if (facing === "left") return mirrored("pet" + kind + "L" + frame, petSprite(kind, "right", frame));
-  return cached("pet" + kind + facing + frame, A, A, (g, cv) => {
-    const step = frame % 2, b = frame ? (frame % 2) : 0;
+// ------------------------------------------------------------------ pets: dogs and cats, chibi style (big heads, big shiny eyes),
+// four facings and a 4-frame trot; each pet has a coat of its own (picked from its name by the game)
+const EYE = "#2a1f1a", SHINE = "#ffffff", BLUSH = "#f4a0a8", NOSE_P = "#f08a9a";
+const CATS = {
+  gray: { c: "#a4a6b2", d: "#7c7e8c", s: "#6a6c7a", l: "#c8cad4", w: "#f4f2f0" }, ginger: { c: "#f0a050", d: "#c87a34", s: "#d06e2a", l: "#f8c890", w: "#fff4e4" },
+  black: { c: "#3e3a46", d: "#2a2732", s: "#2a2732", l: "#5a5664", w: "#f4f2f0" }, cream: { c: "#f2dcb4", d: "#d6b88a", s: "#e0c094", l: "#fbeed8", w: "#ffffff" },
+  calico: { c: "#f6f0e6", d: "#d8d0c4", s: "#e8963c", l: "#ffffff", w: "#ffffff", patch: "#4a4450" },
+};
+const DOGS = {
+  golden: { c: "#e0a85a", d: "#b87e3a", l: "#f4cc8e", w: "#fff0d8", ear: "#c88a44" }, brown: { c: "#a8683a", d: "#7e4a26", l: "#c88a5a", w: "#f4e4d0", ear: "#6e4024" },
+  shiba: { c: "#e88a40", d: "#bc6428", l: "#f4b07a", w: "#fff4e8", ear: "#d07434" }, spotty: { c: "#f4f0ea", d: "#d4ccc0", l: "#ffffff", w: "#ffffff", ear: "#5a4a40", spot: "#5a4a40" },
+  black: { c: "#40384a", d: "#2a2430", l: "#5c5466", w: "#e8d8c0", ear: "#2a2430" },
+};
+function tri(g, x, y, w, h, col, lean) {      // an ear: a triangle with its point at the top (lean shifts the tip left or right)
+  for (let r = 0; r < h; r++) { const ww = Math.max(1, Math.round(w * (r + 1) / h)); px(g, x + Math.round((w - ww) / 2 + (lean || 0) * (h - 1 - r) / h), y + r, ww, 1, col); }
+}
+function eye(g, x, y, h) { px(g, x, y, 2, h, EYE); dot(g, x, y, SHINE); if (h > 2) dot(g, x + 1, y + h - 1, "#5a4a6a"); }
+function petSprite(kind, facing, frame, coat) {
+  const cat = kind === "cat", P = cat ? (CATS[coat] || CATS.gray) : (DOGS[coat] || DOGS.golden);
+  const key = "pet" + kind + (coat || "") + facing + frame;
+  if (facing === "left") return mirrored(key + "L", petSprite(kind, "right", frame, coat));
+  return cached(key, A, A, (g, cv) => {
+    const walk = frame > 0, a = walk ? frame % 2 : 0, b = walk && frame % 2 ? 1 : 0;   // a: which legs are up, b: the body's bounce
     if (facing === "right") {
-      for (const [x, lift] of [[9, step], [12, 1 - step], [19, 1 - step], [22, step]]) px(g, x, 23 - lift, 3, 6, P.d);
-      body(g, 15, 19 - b, 9, 5, P.c); ell(g, 14, 21 - b, 6, 2, P.l);
-      body(g, 23, 13 - b, 5, 5, P.c);
-      if (kind === "dog") { px(g, 26, 14 - b, 4, 3, P.l); dot(g, 29, 14 - b, OUT); px(g, 20, 9 - b, 3, 7, P.ear); }
-      else { px(g, 21, 6 - b, 2, 4, P.c); px(g, 25, 6 - b, 2, 4, P.c); dot(g, 22, 7 - b, "#e8a0a8"); px(g, 27, 15 - b, 2, 1, "#e8a0a8"); }
-      dot(g, 25, 12 - b, OUT);
-      if (kind === "dog") { px(g, 4, 13 - b + (frame % 3), 2, 5, P.c); px(g, 5, 12 - b, 2, 2, P.c); } else { px(g, 4, 9 - b, 2, 11, P.c); px(g, 3, 8 - b, 2, 3, P.c); }
+      // tail (behind): a cat's curls up, a dog's wags
+      if (cat) { for (let i = 0; i < 9; i++) px(g, 5 - Math.round(Math.sin(i / 3) * 2), 17 - i - b, 3, 2, i > 6 ? P.s : P.c); px(g, 5, 7 - b, 3, 2, P.s); }
+      else { const wag = frame % 3 - 1; px(g, 4, 13 - b + wag, 3, 6, P.c); px(g, 3, 12 - b + wag, 3, 3, P.l); }
+      // legs: two far legs a shade darker, two near legs; feet light
+      for (const [x, up, far] of [[8, a, 1], [18, 1 - a, 1], [11, 1 - a, 0], [21, a, 0]]) { px(g, x, 21 - up, 3, 6, far ? P.d : P.c); px(g, x, 26 - up, 3, 1, P.w); }
+      body(g, 14, 19 - b, 8, 5, P.c); ell(g, 14, 22 - b, 5, 1, P.l);
+      if (P.patch) { px(g, 10, 16 - b, 5, 3, P.patch); px(g, 16, 17 - b, 3, 2, P.s); }
+      if (P.spot) { px(g, 9, 17 - b, 3, 2, P.spot); px(g, 15, 15 - b, 2, 2, P.spot); }
+      if (cat && !P.patch) for (const x of [10, 13, 16]) px(g, x, 15 - b, 1, 3, P.s);
+      // head: big and round, ears, muzzle, a big shiny eye
+      const hy = 11 - b;
+      if (cat) { tri(g, 15, hy - 9, 5, 6, P.c, -1); tri(g, 21, hy - 9, 5, 6, P.c, 1); tri(g, 16, hy - 6, 3, 3, NOSE_P); tri(g, 22, hy - 6, 3, 3, NOSE_P); }
+      body(g, 21, hy, 8, 7, P.c);
+      if (cat && !P.patch) { px(g, 19, hy - 6, 1, 3, P.s); px(g, 22, hy - 7, 1, 3, P.s); px(g, 25, hy - 6, 1, 2, P.s); }
+      if (P.patch) px(g, 15, hy - 6, 6, 4, P.patch);
+
+      if (!cat) { px(g, 16, hy - 6, 5, 3, P.ear); px(g, 15, hy - 4, 4, 7, P.ear); px(g, 16, hy + 2, 2, 2, P.ear); px(g, 18, hy - 5, 1, 7, dk(P.ear, 0.8)); }   // a floppy ear
+      ell(g, 26, hy + 3, 3, 2, P.w); dot(g, 29, hy + 1, cat ? NOSE_P : EYE); px(g, 28, hy + 1, 2, 1, cat ? NOSE_P : EYE);
+      eye(g, 23, hy - 2, 3); px(g, 21, hy + 3, 2, 1, BLUSH);
+      if (!cat && walk) { px(g, 27, hy + 5, 2, 2, "#e86a7a"); dot(g, 27, hy + 6, "#c84a5a"); }   // a happy tongue on the trot
     } else {
       const back = facing === "up";
-      for (const [x, lift] of [[10, step], [19, 1 - step]]) px(g, x, 23 - lift, 4, 6, P.d);
-      body(g, 16, 19 - b, 8, 6, P.c);
-      if (!back) ell(g, 16, 21 - b, 4, 3, P.l);
-      body(g, 16, back ? 10 - b : 11 - b, 6, 5, P.c);
-      if (kind === "dog") { px(g, 9, 8 - b, 3, 8, P.ear); px(g, 21, 8 - b, 3, 8, P.ear); } else { px(g, 11, 4 - b, 3, 4, P.c); px(g, 19, 4 - b, 3, 4, P.c); }
-      if (!back) { dot(g, 14, 10 - b, OUT); dot(g, 18, 10 - b, OUT); px(g, 15, 13 - b, 3, 2, kind === "dog" ? OUT : "#e8a0a8"); }
-      else if (kind === "cat") { px(g, 16, 22 - b, 2, 8, P.c); } else { px(g, 15, 14 - b, 3, 3, P.c); }
+      // tail: up behind the back, or peeking round the side in front
+      if (back) { if (cat) { px(g, 15, 5 - b, 3, 12, P.c); px(g, 15, 4 - b, 3, 2, P.s); } else px(g, 15 + (frame % 3) - 1, 12 - b, 3, 5, P.c); }
+      else if (cat) { px(g, 24, 17 - b, 3, 8, P.c); px(g, 25, 14 - b, 3, 4, P.c); px(g, 25, 13 - b, 3, 2, P.s); }
+      // body and paws
+      body(g, 16, 22 - b, 7, 5, P.c);
+      if (!back) ell(g, 16, 22 - b, 3, 3, P.w);
+      for (const [x, up] of [[11, a], [18, 1 - a]]) { px(g, x, 24 - up, 4, 4, P.c); px(g, x, 27 - up, 4, 1, P.w); }
+      // head
+      const hy = 11 - b;
+      if (cat) { tri(g, 8, hy - 10, 6, 7, P.c, -1); tri(g, 18, hy - 10, 6, 7, P.c, 1); if (!back) { tri(g, 9, hy - 7, 4, 4, NOSE_P, -1); tri(g, 19, hy - 7, 4, 4, NOSE_P, 1); } }
+      else { px(g, 6, hy - 4, 4, 10, P.ear); px(g, 22, hy - 4, 4, 10, P.ear); }
+      body(g, 16, hy, 9, 7, P.c);
+      if (back) { if (cat && !P.patch) for (const x of [13, 16, 19]) px(g, x, hy - 6, 1, 4, P.s); }
+      else {
+        if (cat && !P.patch) for (const x of [14, 16, 18]) px(g, x, hy - 7, 1, 3, P.s);
+        if (P.patch) { px(g, 9, hy - 6, 6, 5, P.patch); px(g, 18, hy - 5, 5, 3, P.s); }
+        if (P.spot) px(g, 18, hy - 6, 4, 4, P.spot);
+        ell(g, 16, hy + 3, 4, 2, P.w);
+        eye(g, 11, hy - 2, 3); eye(g, 19, hy - 2, 3);
+        px(g, 15, hy + 1, 3, 2, cat ? NOSE_P : EYE); dot(g, 15, hy + 3, OUT); dot(g, 17, hy + 3, OUT); dot(g, 16, hy + 3, cat ? P.w : "#e86a7a");
+        px(g, 9, hy + 2, 2, 1, BLUSH); px(g, 21, hy + 2, 2, 1, BLUSH);
+      }
     }
     outline(cv, OUT);
   });
 }
+const PET_COATS = { cat: Object.keys(CATS), dog: Object.keys(DOGS) };
 
 // ------------------------------------------------------------------ horses: 48x48, side view (front and back views for up/down)
-const HORSE = { chestnut: ["#a8582e", "#7a3a1a", "#c87a4a", "#3a2214"], black: ["#3a3238", "#221c20", "#5a525a", "#141014"],
-  white: ["#ece6dc", "#c8c0b2", "#ffffff", "#9a9284"], dapple: ["#a8a8b0", "#7a7a84", "#d0d0d8", "#3a3a40"] };
+const HORSE = { chestnut: ["#b0623a", "#84422a", "#cc8458", "#4a2a1a"], black: ["#3e3640", "#262028", "#5e5662", "#141014"],
+  white: ["#f0eae0", "#cec6b8", "#ffffff", "#b8a890"], dapple: ["#acacb6", "#80808c", "#d4d4dc", "#4a4a54"] };
 function horseSprite(color, facing, frame) {
   const [c, d, l, mane] = HORSE[color] || HORSE.chestnut;
   if (facing === "left") return mirrored("horse" + color + "L" + frame, horseSprite(color, "right", frame));
   return cached("horse" + color + facing + frame, 48, 48, (g, cv) => {
-    const gal = frame % 4, lift = [0, 2, 0, 2][gal], sw = [-3, 0, 3, 0][gal];
+    const gal = frame % 4, lift = [0, 2, 0, 2][gal], sw = [-2, 0, 2, 0][gal];
     if (facing === "right") {
-      for (const [x, s] of [[12, sw], [17, -sw], [31, -sw], [36, sw]]) { px(g, x + Math.round(s / 2), 30, 4, 13, d); px(g, x + Math.round(s / 2) - 1, 42, 5, 3, "#2b2118"); }
-      body(g, 24, 26 - lift, 15, 8, c); ell(g, 22, 29 - lift, 10, 3, d);
-      for (let i = 0; i < 9; i++) px(g, 34 + i, 23 - i - lift, 6, 6, c);
-      body(g, 42, 12 - lift, 5, 4, c); px(g, 44, 14 - lift, 4, 3, l); dot(g, 42, 10 - lift, OUT); px(g, 39, 5 - lift, 2, 4, c);
-      for (let i = 0; i < 9; i++) px(g, 33 + i, 18 - i - lift, 3, 3, mane);
-      px(g, 6, 22 - lift, 4, 3, mane); px(g, 4, 24 - lift, 4, 12, mane); px(g, 3, 30 - lift, 3, 6, mane);
-      px(g, 18, 18 - lift, 12, 4, "#8a5a2a"); px(g, 18, 18 - lift, 12, 1, "#b8824c"); px(g, 22, 22 - lift, 2, 8, "#c9a640");
+      // tail, legs (far pair darker), barrel, neck, a big friendly head kept inside the canvas
+      px(g, 5, 21 - lift, 4, 4, mane); px(g, 3, 24 - lift, 4, 10, mane); px(g, 4, 33 - lift, 3, 3, mane);
+      for (const [x, s, far] of [[11, sw, 1], [28, -sw, 1], [15, -sw, 0], [32, sw, 0]]) { const xx = x + Math.round(s / 2); px(g, xx, 30, 4, 12, far ? d : c); px(g, xx, 39, 4, 2, l); px(g, xx - 1, 41, 6, 3, "#3a2a1e"); }
+      body(g, 22, 26 - lift, 13, 8, c); ell(g, 21, 30 - lift, 9, 2, l);
+      for (let i = 0; i < 8; i++) px(g, 30 + i, 22 - i - lift, 7, 7, c);                 // the neck
+      for (let i = 0; i < 8; i++) px(g, 27 + i, 19 - i - lift, 3, 4, mane);              // the mane along its back edge
+      tri(g, 34, 3 - lift, 3, 5, d, -1); tri(g, 37, 3 - lift, 3, 5, c, 0); dot(g, 38, 6 - lift, NOSE_P);
+      body(g, 39, 13 - lift, 6, 5, c); ell(g, 43, 16 - lift, 3, 3, l); dot(g, 45, 15 - lift, d); px(g, 43, 18 - lift, 3, 1, d);
+      px(g, 35, 7 - lift, 3, 2, mane);                                                    // a forelock between the ears
+      eye(g, 39, 10 - lift, 3); px(g, 37, 14 - lift, 2, 1, BLUSH);
+      px(g, 17, 18 - lift, 12, 4, "#8a5a2a"); px(g, 17, 18 - lift, 12, 1, "#b8824c"); px(g, 21, 22 - lift, 2, 8, "#c9a640");
     } else {
       const back = facing === "up";
-      for (const [x, s] of [[16, lift], [28, 2 - lift]]) { px(g, x, 30 - s, 5, 13 + s, d); px(g, x - 1, 42, 7, 3, "#2b2118"); }
+      for (const [x, s] of [[16, lift], [28, 2 - lift]]) { px(g, x, 30 - s, 5, 12 + s, d); px(g, x - 1, 41, 7, 3, "#3a2a1e"); }
       body(g, 24, 26, 10, 10, c);
-      if (back) { px(g, 22, 30, 4, 14, mane); body(g, 24, 14, 6, 6, c); px(g, 22, 8, 4, 8, mane); }
-      else { body(g, 24, 13, 6, 8, c); px(g, 21, 16, 7, 5, l); dot(g, 21, 11, OUT); dot(g, 27, 11, OUT); px(g, 19, 5, 3, 5, c); px(g, 27, 5, 3, 5, c); px(g, 22, 5, 5, 4, mane); }
+      if (back) { px(g, 22, 30, 4, 13, mane); body(g, 24, 14, 6, 6, c); px(g, 22, 8, 4, 8, mane); tri(g, 18, 4, 3, 5, c); tri(g, 27, 4, 3, 5, c); }
+      else {
+        tri(g, 17, 1, 4, 6, c); tri(g, 27, 1, 4, 6, c); body(g, 24, 13, 7, 8, c); ell(g, 24, 19, 5, 3, l); dot(g, 22, 19, d); dot(g, 26, 19, d);
+        eye(g, 19, 10, 3); eye(g, 27, 10, 3); px(g, 18, 15, 2, 1, BLUSH); px(g, 28, 15, 2, 1, BLUSH); px(g, 21, 4, 6, 4, mane);
+      }
       px(g, 16, 22, 16, 4, "#8a5a2a"); px(g, 16, 22, 16, 1, "#b8824c");
     }
     outline(cv, OUT);
@@ -115,48 +167,74 @@ function monsterSprite(kind, frame) {
       const ey = by - h - (f ? 0 : 1);
       px(g, cx - Math.round(5 * k), ey, Math.round(2 * k), Math.round(3 * k), OUT); px(g, cx + Math.round(3 * k), ey, Math.round(2 * k), Math.round(3 * k), OUT);
       dot(g, cx - Math.round(5 * k), ey, WHITE); dot(g, cx + Math.round(3 * k), ey, WHITE);
+      px(g, cx - Math.round(1 * k), ey + Math.round(4 * k), Math.round(3 * k), 1, OUT); dot(g, cx - Math.round(2 * k), ey + Math.round(3 * k), OUT); dot(g, cx + Math.round(2 * k), ey + Math.round(3 * k), OUT);   // a little smile
+      px(g, cx - Math.round(8 * k), ey + Math.round(3 * k), 2, 1, "#ff9ab0"); px(g, cx + Math.round(6 * k), ey + Math.round(3 * k), 2, 1, "#ff9ab0");
       if (big) { for (let i = 0; i < 5; i++) px(g, cx - 10 + i * 5, by - 2 * h - 8 + (i % 2 ? 2 : 0), 3, 7 - (i % 2 ? 2 : 0), "#f2c744"); px(g, cx - 11, by - 2 * h - 2, 23, 3, "#f2c744"); dot(g, cx, by - 2 * h - 5, "#e0384f"); }
     } else if (kind === "bat") {
       const y = f ? 12 : 14;
-      body(g, 16, y + 2, 4, 5, "#5a3a6a"); dot(g, 15, y + 1, "#ff6060"); dot(g, 18, y + 1, "#ff6060"); px(g, 13, y - 3, 2, 3, "#5a3a6a"); px(g, 18, y - 3, 2, 3, "#5a3a6a");
+      body(g, 16, y + 2, 5, 5, "#5a3a6a"); px(g, 12, y - 4, 2, 4, "#5a3a6a"); px(g, 19, y - 4, 2, 4, "#5a3a6a");
+      px(g, 13, y, 3, 3, "#ffffff"); px(g, 17, y, 3, 3, "#ffffff"); px(g, 14, y + 1, 2, 2, EYE); px(g, 18, y + 1, 2, 2, EYE); dot(g, 14, y + 1, "#ffffff"); dot(g, 18, y + 1, "#ffffff");
+      dot(g, 15, y + 5, "#ffffff"); dot(g, 17, y + 5, "#ffffff");
       for (let i = 0; i < 10; i++) { const wy = y + (f ? -i / 2 : i / 3); px(g, 11 - i, Math.round(wy), 2, 4 - (i % 3), "#7a4a9a"); px(g, 20 + i, Math.round(wy), 2, 4 - (i % 3), "#7a4a9a"); }
     } else if (kind === "rock_crab") {
       for (const x of [5, 9, 21, 25]) px(g, x, 21 - f, 2, 6, "#a84a3a");
       ell(g, 16, 18, 12, 8, "#666a70"); ell(g, 15, 17, 11, 7, "#8b8e8c"); ell(g, 12, 14, 5, 3, "#b1aea7"); for (const [x, y] of [[10, 19], [19, 15], [22, 20]]) dot(g, x, y, "#474a52");
-      px(g, 2, 15 + f, 5, 4, "#c85a3a"); px(g, 25, 15 + f, 5, 4, "#c85a3a"); px(g, 11, 24, 2, 3, OUT); px(g, 19, 24, 2, 3, OUT);
+      px(g, 2, 15 + f, 5, 4, "#c85a3a"); px(g, 25, 15 + f, 5, 4, "#c85a3a"); px(g, 1, 14 + f, 2, 2, "#e07a5a"); px(g, 29, 14 + f, 2, 2, "#e07a5a");
+      px(g, 12, 6 - f, 1, 5, "#a84a3a"); px(g, 19, 6 - f, 1, 5, "#a84a3a"); px(g, 11, 4 - f, 3, 3, "#ffffff"); px(g, 18, 4 - f, 3, 3, "#ffffff"); px(g, 12, 5 - f, 2, 2, EYE); px(g, 19, 5 - f, 2, 2, EYE);
     } else if (kind === "ghost") {
       const y = f ? 4 : 6;
       for (let r = 0; r < 20; r++) { const hw = r < 8 ? Math.round(Math.sqrt(64 - (8 - r) * (8 - r)) * 1.1) : 9; px(g, 16 - hw, y + r, hw * 2, 1, r < 6 ? "#f4fbff" : "#d8eef8"); }
       for (let i = 0; i < 4; i++) px(g, 7 + i * 5, y + 20, 3, 2 + ((i + f) % 2) * 2, "#d8eef8");
-      px(g, 11, y + 7, 3, 4, "#2a2a4a"); px(g, 18, y + 7, 3, 4, "#2a2a4a"); px(g, 14, y + 13, 4, 2, "#2a2a4a");
+      px(g, 11, y + 7, 3, 4, "#2a2a4a"); px(g, 18, y + 7, 3, 4, "#2a2a4a"); dot(g, 11, y + 7, "#ffffff"); dot(g, 18, y + 7, "#ffffff");
+      px(g, 14, y + 13, 4, 2, "#2a2a4a"); px(g, 15, y + 14, 2, 1, "#f08aa0"); px(g, 8, y + 11, 3, 1, "#ffb0c8"); px(g, 21, y + 11, 3, 1, "#ffb0c8");
     }
     outline(cv, OUT);
   });
 }
 
-// ------------------------------------------------------------------ wild game (facing right; mirrored for left)
+// ------------------------------------------------------------------ wild game (facing right; mirrored for left), round and soft
 function critterSprite(kind, frame) {
   const S = kind === "deer" ? 48 : A;
   return cached("crit" + kind + frame, S, S, (g, cv) => {
     const f = frame % 2;
     if (kind === "rabbit") {
-      body(g, 14, 22 - f, 8, 5, "#c9a07a"); body(g, 22, 16 - f, 4, 4, "#c9a07a"); px(g, 20, 6 - f, 2, 8, "#c9a07a"); px(g, 23, 5 - f, 2, 9, "#b8906a"); dot(g, 21, 8 - f, "#f0b8b8");
-      dot(g, 24, 15 - f, OUT); px(g, 5, 19 - f, 3, 3, "#f4f1ea"); px(g, 9 + f * 2, 26, 4, 2, "#a8805a"); px(g, 18 - f * 2, 26, 3, 2, "#a8805a");
+      const c = "#d8b48c", d = "#b08c66", l = "#f0dcc0", hop = f ? 2 : 0;
+      px(g, 4, 17 - hop, 4, 4, "#ffffff"); dot(g, 4, 17 - hop, "#f4f0ea");                                  // cotton tail
+      px(g, 7, 25 - hop, 7, 2, d); px(g, 18, 25 - hop, 3, 2, c);                                             // big back foot, front paw
+      body(g, 13, 20 - hop, 8, 6, c); ell(g, 13, 23 - hop, 5, 1, l);
+      px(g, 17, 1 - hop + 2, 3, 10, c); px(g, 18, 3 - hop + 2, 1, 6, NOSE_P); px(g, 21, 2 - hop + 2, 3, 10, d); px(g, 22, 4 - hop + 2, 1, 6, NOSE_P);   // ears
+      body(g, 21, 15 - hop, 6, 5, c); ell(g, 24, 17 - hop, 3, 2, l);
+      eye(g, 21, 13 - hop, 3); dot(g, 27, 16 - hop, NOSE_P); px(g, 19, 17 - hop, 2, 1, BLUSH);
     } else if (kind === "quail") {
-      px(g, 14, 24, 1, 4, "#e8a030"); px(g, 18, 24 - f, 1, 4, "#e8a030");
-      body(g, 15, 19, 8, 6, "#8a6a4a"); body(g, 22, 13, 4, 4, "#8a6a4a"); px(g, 22, 6, 1, 4, OUT); px(g, 21, 5, 2, 2, OUT);
-      px(g, 26, 13, 2, 1, "#4a3a2a"); dot(g, 23, 12, OUT); for (let x = 10; x < 20; x += 3) dot(g, x, 18, WHITE); px(g, 20, 16, 5, 1, WHITE);
+      const c = "#9a7450", d = "#74543a", l = "#c8a47c", step = f ? 1 : 0;
+      px(g, 13, 23, 1, 5 - step, "#e8a030"); px(g, 18, 23, 1, 5 - (1 - step), "#e8a030"); px(g, 12, 27, 3, 1, "#e8a030"); px(g, 17, 27, 3, 1, "#e8a030");
+      body(g, 15, 19, 9, 7, c); ell(g, 15, 22, 6, 2, l);
+      for (const [x, y] of [[9, 16], [12, 15], [15, 17], [11, 19], [18, 16]]) { dot(g, x, y, "#ffffff"); dot(g, x + 1, y, d); }
+      body(g, 22, 11, 5, 5, c); px(g, 20, 13, 7, 1, "#ffffff"); px(g, 24, 14, 3, 2, "#3a2a1e");             // face stripe and throat
+      px(g, 22, 3, 2, 4, OUT); px(g, 23, 2, 3, 2, OUT);                                                     // the curly plume
+      px(g, 27, 11, 3, 2, "#4a3a2a"); eye(g, 23, 9, 2); px(g, 20, 12, 2, 1, BLUSH);
     } else if (kind === "deer") {
-      for (const [x, s] of [[14, f], [18, -f], [30, -f], [34, f]]) { px(g, x + s, 30, 3, 14, "#8a5a32"); px(g, x + s, 43, 3, 2, OUT); }
-      body(g, 24, 27, 13, 7, "#b8784a"); ell(g, 24, 30, 9, 3, "#e8c8a0");
-      for (let i = 0; i < 8; i++) px(g, 33 + i, 23 - i, 4, 5, "#b8784a");
-      body(g, 40, 13, 4, 4, "#b8784a"); px(g, 43, 14, 3, 2, "#3a2a1a"); dot(g, 40, 11, OUT);
-      px(g, 38, 2, 1, 8, "#e8dcc0"); px(g, 35, 3, 4, 1, "#e8dcc0"); px(g, 41, 3, 1, 7, "#e8dcc0"); px(g, 41, 4, 4, 1, "#e8dcc0");
-      for (const [x, y] of [[20, 24], [26, 23], [29, 27]]) dot(g, x, y, WHITE); px(g, 9, 24, 3, 3, "#f4f1ea");
+      // a fawn: a big head, big ears and eyes, a dappled back, slender legs, a white powder-puff tail
+      const c = "#c08450", d = "#94603a", l = "#ecd2aa", hoof = "#3a2a1e";
+      for (const [x, s, far] of [[13, f, 1], [27, -f, 1], [16, -f, 0], [30, f, 0]]) { px(g, x + s, 31, 3, 10, far ? d : c); px(g, x + s, 40, 3, 2, hoof); }
+      px(g, 8, 21, 4, 5, "#ffffff"); px(g, 9, 20, 2, 1, "#ffffff");
+      body(g, 22, 27, 12, 7, c); ell(g, 22, 31, 8, 2, l);
+      for (const [x, y] of [[15, 23], [19, 22], [23, 22], [27, 23], [17, 26], [21, 25], [25, 25]]) px(g, x, y, 2, 1, "#fff4e4");
+      for (let i = 0; i < 7; i++) px(g, 29 + i, 24 - i, 6, 6, c);
+      tri(g, 30, 4, 5, 8, d, -2); tri(g, 31, 6, 2, 5, l, -2);                                                // back ear
+      body(g, 37, 14, 7, 6, c); ell(g, 41, 17, 4, 3, l); px(g, 43, 15, 2, 2, hoof);
+      tri(g, 40, 3, 5, 8, c, 2); tri(g, 41, 5, 3, 5, NOSE_P, 2);                                            // front ear
+      px(g, 35, 7, 1, 3, "#8a6a4a"); px(g, 39, 6, 1, 3, "#8a6a4a");                                          // little antler nubs
+      eye(g, 36, 11, 4); px(g, 34, 16, 2, 1, BLUSH);
     } else if (kind === "boar") {
-      for (const [x, s] of [[9, f], [13, -f], [20, -f], [24, f]]) px(g, x + s, 23, 3, 6, "#3a2a22");
-      body(g, 16, 18, 11, 7, "#6a4a3a"); for (let x = 8; x < 24; x += 2) px(g, x, 10, 1, 3, "#3a2a1a");
-      body(g, 26, 19, 4, 4, "#7a5a4a"); px(g, 29, 20, 3, 3, "#a87a6a"); px(g, 27, 23, 3, 1, "#f4f1ea"); dot(g, 26, 17, "#ff6040"); px(g, 4, 15, 2, 4, "#6a4a3a");
+      // a chubby, bristly boar: piglet face, pink snout, little tusks
+      const c = "#7a5848", d = "#5a3e32", l = "#9a7464", step = f;
+      for (const [x, s, far] of [[8, step, 1], [19, -step, 1], [11, -step, 0], [22, step, 0]]) { px(g, x + s, 23, 3, 5, far ? d : c); px(g, x + s, 27, 3, 1, OUT); }
+      px(g, 3, 15, 2, 2, c); dot(g, 2, 14, c);                                                              // curly tail
+      body(g, 14, 19, 10, 7, c); ell(g, 14, 23, 7, 1, l); for (let x = 7; x < 22; x += 2) px(g, x, 11 + (x % 4 === 1 ? 0 : 1), 1, 3, "#3a2a20");
+      body(g, 24, 18, 6, 6, c); tri(g, 20, 9, 4, 5, d, -1);
+      ell(g, 29, 20, 2, 3, "#e8a0a0"); dot(g, 29, 19, "#a85a5a"); dot(g, 29, 21, "#a85a5a");
+      px(g, 26, 23, 1, 2, "#fff4e4"); eye(g, 24, 15, 3); px(g, 22, 20, 2, 1, BLUSH);
     }
     outline(cv, OUT);
   });
@@ -279,5 +357,5 @@ ART.iconCanvas = function (key, cat) {
   return prevIconL(key, cat);
 };
 
-Object.assign(ART, { bullSprite, chickenSprite, petSprite, horseSprite, monsterSprite, critterSprite, digSprite, treasureSprite, balloonSprite, machineSprite, hatSprite });
+Object.assign(ART, { PET_COATS, bullSprite, chickenSprite, petSprite, horseSprite, monsterSprite, critterSprite, digSprite, treasureSprite, balloonSprite, machineSprite, hatSprite });
 })();

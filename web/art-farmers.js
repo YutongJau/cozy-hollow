@@ -353,6 +353,7 @@ const ARM_UP_BOY_SIDE = raisedArm(ARM_UP_BOY_L, 3), ARM_UP_GIRL_SIDE = raisedArm
 /* layout: the figure stands two rows below the top edge (hat crown and hair from y = 3, feet on y = 46) so the 2px walk bob and the
    outline both fit inside the canvas on every frame. Body parts above the legs are drawn in a context translated up by the bob. */
 function farmerSprite(kind, facing, frame, shirtHex, hatKind, armsUp) {
+  if (LOOKS[kind]) return personSprite(kind, facing, frame, armsUp);       // a villager (or Claude) with a look of their own
   const key = "farmer:" + kind + facing + frame + shirtHex + (hatKind || "cowboy") + (armsUp ? "U" : "");
   const hit = cache.get(key);
   if (hit) return hit;
@@ -468,6 +469,261 @@ function farmerSprite(kind, facing, frame, shirtHex, hatKind, armsUp) {
   // --- side view, arms up: the near arm rises in front of the ear and the hat with the hand near the top of the head. It sits inside
   //     the head's silhouette, so a dark rim is drawn under it by hand to keep it apart from the face and the straw hat
   if (armsUp && side) { px(g, 15, 4, 5, 19, OUT); blit(g, 16, 5, boy ? ARM_UP_BOY_SIDE : ARM_UP_GIRL_SIDE, P); }
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  outline(c, OUT);
+  const done = facing === "left" ? mirrored(key, c) : c;
+  cache.set(key, done);
+  return done;
+}
+
+// ------------------------------------------------------------ people with looks of their own (every villager, and Claude)
+/* A look is one person: body "boy" (shirt and trousers, an overalls bib if bib) or "girl" (a dress), the head's hair shape ("boy" or
+   "girl") and style, skin, hair colour, clothes, a hat and a few touches (beard, glasses, badge...). personSprite draws it on the farmers'
+   own grids, size and 8-frame walk, so a villager stands in the world exactly like a player does. */
+const SKINS = {   // k K L b m: skin, shadow, light, blush, mouth
+  light: [SKIN, SKIN_S, SKIN_L, BLUSH, MOUTH], fair: ["#f9dcc6", "#e3b99a", "#fdeee2", "#f2aaa8", "#c8746a"],
+  tan: ["#e2a878", "#c28658", "#eec49a", "#e08a78", "#a8584a"], brown: ["#bb7e52", "#98613e", "#d0986c", "#c87262", "#7a3e34"],
+  deep: ["#8c5838", "#6c4028", "#a66c48", "#aa5a4a", "#5a2c22"],
+};
+const HAIRS = {   // H h x d: base, sheen, bright strand, strand break
+  black: [HAIR, HAIR_L, HAIR_X, HAIR_D], brown: ["#6a4630", "#84583c", "#a0714c", "#4a2e1e"], chestnut: ["#8a4a2a", "#a65c36", "#c27a4a", "#64321c"],
+  ginger: ["#c8582a", "#e07438", "#f29a58", "#94401e"], blonde: ["#d9ad54", "#e8c470", "#f6e0a0", "#b08834"], platinum: ["#e4dcc2", "#f2ecda", "#ffffff", "#bcb49a"],
+  gray: ["#8e8e98", "#a8a8b2", "#c8c8d0", "#6c6c76"], white: ["#dedee4", "#efeff2", "#ffffff", "#b4b4be"], silver: ["#aab0c0", "#c4c8d4", "#e2e6ee", "#828898"],
+  plum: ["#5a2a4a", "#74385e", "#924a78", "#3e1a32"], teal: ["#2e6a72", "#3c8790", "#5aa8b0", "#1e4a50"],
+};
+const TROUSERS = {   // n N l X
+  denim: [DENIM, DENIM_D, DENIM_L, DENIM_X], black: ["#3a3a46", "#262630", "#52525e", "#18181e"], brown: ["#7a5236", "#5a3a24", "#946a48", "#3e2616"],
+  khaki: ["#b4a072", "#927e56", "#cab68a", "#74623c"], gray: ["#6a6e7a", "#4e525e", "#868a96", "#363a44"], olive: ["#6a7044", "#4e5430", "#868c5a", "#363a20"],
+  navy: ["#2e3a5e", "#1e2844", "#46527a", "#141a2e"], jeans: ["#2c3448", "#1e2434", "#3e4a64", "#121620"],
+};
+const tones = (h) => [h, shade(h, 0.72), shade(h, 1.18)];   // base, shadow, light (from a #hex)
+const LOOKS = {};
+
+/* hair styles reshape a head grid: rows above the hairline are the hair on top, the outer columns frame the face */
+function styleHead(rows, style, view) {
+  if (style === "bald") return rows.map((r, y) => y >= HAIRLINE ? r : r.split("").map((ch, x) => {
+    if (ch === "." || y === 0) return ".";
+    if ((x <= 1 || x >= r.length - 2) && y >= 5) return ch;                       // what's left around the sides
+    if (view === "side" && x <= 2 && y >= 3) return ch;
+    return (y === 2 && x >= 4 && x <= 6) || (y === 3 && x === 4) ? "L" : x >= r.length - 4 ? "K" : "k";
+  }).join(""));
+  if (style === "quiff") {
+    const top = view === "front" ? ["....HHHHHHHH......", "..HHhhxxhhHHHH....", ".HHhxxxhhHHHHHHH..", "HHhxxhhHHHHHHHHHHH"]
+      : view === "side" ? [".......HHHHHHH....", "....HHhhhxxhHHHH..", "..HHhhxxhhHHHHHHH.", ".HHhxxhhHHHHHHHHH."] : null;
+    if (top) return top.concat(rows.slice(4));
+  }
+  return rows;
+}
+const BEARD = {
+  front: { full: ["BB..............BB", "BBB............BBB", ".BBBBBBB..BBBBBBB.", "..BBBBBBmmBBBBBB..", "...BBBBBBBBBBBB...", "....BBBBBBBBBB....", "......dBBBBd......"],
+           mustache: ["..................", "..................", "......BBBBBB......", ".....B......B....."],
+           goatee: ["..................", "..................", ".......BBBB.......", "..................", "........BB........", "........BB........"] },
+  side: { full: ["......B...........", "......BB.........B", "......BBBBBBBB..BB", ".......BBBBBBBBmB.", ".......BBBBBBBBBB.", "........BBBBBBBB..", "..........dBBBd..."],
+          mustache: ["..................", "..................", "............BBBBB.", "...............B.."],
+          goatee: ["..................", "..................", "..............BBB.", "..................", "..............BB..", "..............BB.."] },
+};
+function drawFace(g, L, view, P) {
+  // beard (rows from the cheeks down past the chin), glasses, shades or an eyepatch; head grids sit at (7, 3)
+  if (view === "back") return;
+  const hx = 7, hy = 3, side = view === "side";
+  if (L.beard) blit(g, hx, hy + 15, BEARD[view][L.beard], P);
+  const lens = side ? [[13, 15]] : [[3, 7], [10, 14]];
+  if (L.glasses === "round") {
+    // clear lenses: a thin frame, pale glass, the eye a small dark pupil with a glint
+    for (const [a, b] of lens) {
+      px(g, hx + a, hy + 11, b - a + 1, 1, P.G); px(g, hx + a, hy + 15, b - a + 1, 1, P.G); px(g, hx + a, hy + 12, 1, 3, P.G); px(g, hx + b, hy + 12, 1, 3, P.G);
+      px(g, hx + a + 1, hy + 12, b - a - 1, 3, "#eaf4f8"); px(g, hx + a + 2, hy + 13, 2, 2, EYE); px(g, hx + a + 1, hy + 12, 1, 1, "#ffffff");
+    }
+    if (side) px(g, hx + 8, hy + 12, 5, 1, P.G); else px(g, hx + 8, hy + 12, 2, 1, P.G);
+  }
+  if (L.glasses === "shades") {
+    const sh = "#1c1a24", rim = "#0e0d12";
+    for (const [a, b] of side ? [[13, 17]] : lens) { px(g, hx + a, hy + 12, b - a + 1, 3, sh); px(g, hx + a, hy + 11, b - a + 1, 1, rim); px(g, hx + a + 1, hy + 12, 1, 1, "#9ad8ff"); px(g, hx + a + 2, hy + 12, 1, 1, "#e8f6ff"); }
+    if (side) px(g, hx + 8, hy + 12, 5, 1, rim); else px(g, hx + 8, hy + 12, 2, 1, rim);
+  }
+  if (L.eyepatch) {
+    if (side) { px(g, hx + 13, hy + 12, 3, 3, "#1c1a24"); px(g, hx + 3, hy + 11, 10, 1, "#1c1a24"); }
+    else { px(g, hx + 10, hy + 12, 4, 3, "#1c1a24"); px(g, hx, hy + 10, 10, 1, "#1c1a24"); px(g, hx + 14, hy + 11, 4, 1, "#1c1a24"); }
+  }
+}
+function drawHat(g, L, view) {
+  /* hats sit on the head grid's top; covering hats are drawn over a head whose hair rows above the brim were skipped */
+  const [c, cD, cL] = tones(L.hatColor || "#8a5a3a"), band = L.hatBand || cD, side = view === "side", back = view === "back";
+  const k = L.hat;
+  if (k === "cowboy" || k === "ranger" || k === "straw") {
+    const straw = k === "straw";
+    const pal = { L: cL, M: c, D: cD, X: shade(L.hatColor || "#8a5a3a", 0.55), B: band, Y: shade(L.hatBand || "#4a2e1c", 0.75), c: CLASP };
+    if (straw) { if (side) blit(g, 4, 7, BRIM_STRAW_SIDE, pal); else blit(g, 1, 7, BRIM_STRAW_FRONT, pal); blit(g, 8, 3, CROWN_STRAW, pal); }
+    else { if (side) blit(g, 5, 7, BRIM_COWBOY_SIDE, pal); else blit(g, 2, 7, BRIM_COWBOY_FRONT, pal); blit(g, 8, 3, CROWN_COWBOY, pal); }
+    if (k === "ranger") { px(g, 10, 6, 12, 1, band); }
+    return;
+  }
+  if (k === "cap") {           // a peaked cap: courier, captain, lamplighter
+    px(g, 11, 4, 10, 1, c); px(g, 9, 5, 14, 1, c); px(g, 8, 6, 16, 4, c); px(g, 10, 5, 4, 2, cL); px(g, 8, 9, 16, 2, band);
+    if (!back && !side) { px(g, 8, 11, 16, 1, cD); px(g, 9, 12, 14, 1, shade(L.hatColor || "#8a5a3a", 0.5)); px(g, 15, 6, 2, 2, L.badge || CLASP); }
+    if (side) { px(g, 19, 11, 8, 1, cD); px(g, 20, 12, 7, 1, shade(L.hatColor || "#8a5a3a", 0.5)); px(g, 19, 6, 2, 2, L.badge || CLASP); }
+    return;
+  }
+  if (k === "beanie") {
+    px(g, 11, 3, 10, 1, c); px(g, 9, 4, 14, 1, c); px(g, 8, 5, 16, 5, c); for (let x = 9; x < 23; x += 2) px(g, x, 5, 1, 4, cD);
+    px(g, 8, 9, 16, 3, cD); px(g, 8, 9, 16, 1, cL); px(g, 14, 1, 4, 2, L.hatBand || WHITE);
+    return;
+  }
+  if (k === "chef") {
+    px(g, 11, 2, 10, 1, WHITE); px(g, 9, 3, 14, 5, WHITE); px(g, 9, 3, 3, 4, "#ffffff"); px(g, 13, 2, 1, 6, "#e2ddd2"); px(g, 18, 2, 1, 6, "#e2ddd2");
+    px(g, 9, 8, 14, 3, "#ece6da"); px(g, 9, 10, 14, 1, "#d6cfc0");
+    return;
+  }
+  if (k === "tophat") {
+    px(g, 11, 2, 10, 7, c); px(g, 11, 2, 2, 7, cL); px(g, 11, 7, 10, 2, band); px(g, 7, 9, 18, 2, c); px(g, 7, 9, 18, 1, cL); px(g, 7, 10, 18, 1, cD);
+    return;
+  }
+  if (k === "bandana") {
+    px(g, 8, 9, 16, 3, c); px(g, 8, 9, 16, 1, cL); for (let x = 10; x < 23; x += 4) px(g, x, 10, 1, 1, WHITE);
+    if (side || back) { px(g, back ? 14 : 6, 10, 4, 3, c); px(g, back ? 15 : 5, 12, 2, 3, cD); }
+    return;
+  }
+  if (k === "flower") {         // a little wreath; the hair shows through
+    const fl = ["#ff7eb6", "#ffe066", "#ffffff", "#ff8f5a", "#c86ee0"];
+    px(g, 8, 8, 16, 2, "#4f9e3b");
+    for (let i = 0; i < (side ? 4 : 5); i++) { const x = (side ? 10 : 8) + i * 3; px(g, x, 6 + (i % 2), 3, 3, fl[i]); px(g, x + 1, 7 + (i % 2), 1, 1, "#f2c744"); }
+  }
+}
+const COVERS = { cowboy: 1, ranger: 1, straw: 1, cap: 1, beanie: 1, chef: 1, tophat: 1 };
+function personSprite(id, facing, frame, armsUp) {
+  const key = "person:" + id + facing + frame + (armsUp ? "U" : "");
+  const hit = cache.get(key);
+  if (hit) return hit;
+  const L = LOOKS[id];
+  const side = facing === "left" || facing === "right", back = facing === "up", front = !side && !back, view = side ? "side" : back ? "back" : "front";
+  const boy = L.body !== "girl", headBoy = (L.head || L.body) !== "girl";
+  const style = L.style || (headBoy ? "short" : "long"), hatOn = !!(L.hat && L.hat !== "none"), covers = hatOn && COVERS[L.hat];
+  const c = blank(32, 48), g = c.getContext("2d");
+  const [k, K, Lk, b, m] = SKINS[L.skin || "light"], [H, h, x, d] = HAIRS[L.hair || "black"];
+  const [s, S, t] = tones(L.shirt || "#e05a4a"), [n, N, l, X] = TROUSERS[L.pants || "denim"];
+  const [o, O, z] = L.boots ? [L.boots, shade(L.boots, 1.2), shade(L.boots, 0.6)] : [BOOT, BOOT_L, BOOT_X];
+  const apron = L.apron === undefined ? !boy : L.apron, [ap, apD, apL] = apron && apron !== true ? tones(apron) : [APRON, APRON_D, APRON_L];
+  const P = {
+    H, h, x, d, k, K, L: Lk, e: EYE, E: EYE_SOFT, w: EYE_W, b, m,
+    s, S, t, n, N, l, X, c: CLASP,
+    a: apron ? ap : s, A: apron ? apD : S, P: apron === true ? APRON_DOT : apron ? apD : s, W: L.socks || WHITE, V: "#d8d2c4", o, O, z,
+    R: L.bow || RED, D: shade(L.bow || "#e04a5a", 0.75), p: RED_P, B: HAIRS[L.beardColor || L.hair || "black"][0], G: L.glassColor || "#3a3440",
+  };
+  if (L.beard) P.d = HAIRS[L.beardColor || L.hair || "black"][3];
+  const PSHADOW = Object.assign({}, P, { k: K, L: k, H, h: H, x: H, d: H });
+  const coat = L.coat || L.jacket, [cc, cD, cL] = coat ? tones(coat) : [s, S, t];
+  const PA = coat ? Object.assign({}, P, { s: cc, S: cD, t: cL }) : P;       // sleeves take the coat's colour
+  const tt = (frame % 8) / 8, sn = Math.sin(tt * Math.PI * 2), cs = Math.cos(tt * Math.PI * 2);
+  const liftL = Math.round(Math.max(0, sn) * 3), liftR = Math.round(Math.max(0, -sn) * 3);
+  const swing = Math.round(sn * 2), bob = Math.round(Math.abs(sn) * 2), f = Math.round(sn * 4);
+  const liftNear = Math.round(Math.max(0, cs) * Math.abs(sn) * 3), liftFar = Math.round(Math.max(0, -cs) * Math.abs(sn) * 3);
+  // --- legs and feet
+  if (!side) {
+    if (boy) { blit(g, 10, 33 - liftL, LEG_BOY_L, P); blit(g, 10, 43 - liftL, BOOT_FRONT, P); blit(g, 17, 33 - liftR, LEG_BOY_R, P); blit(g, 17, 43 - liftR, BOOT_FRONT, P); }
+    else { blit(g, 11, 38 - liftL, LEG_GIRL, P); blit(g, 11, 43 - liftL, SHOE_FRONT, P); blit(g, 17, 38 - liftR, LEG_GIRL, P); blit(g, 17, 43 - liftR, SHOE_FRONT, P); }
+  } else if (boy) {
+    blit(g, 12 - f, 33 - liftFar, LEG_BOY_FAR, P); blit(g, 12 - f, 43 - liftFar, BOOT_SIDE_FAR, P);
+    blit(g, 15 + f, 33 - liftNear, LEG_BOY_L, P); blit(g, 15 + f, 43 - liftNear, BOOT_SIDE, P);
+  } else {
+    blit(g, 13 - f, 38 - liftFar, LEG_GIRL_FAR, P); blit(g, 13 - f, 43 - liftFar, SHOE_SIDE_FAR, P);
+    blit(g, 15 + f, 38 - liftNear, LEG_GIRL, P); blit(g, 15 + f, 43 - liftNear, SHOE_SIDE, P);
+  }
+  g.translate(0, -bob);
+  // --- a long coat's tails hang behind the legs
+  if (L.coat) { if (side) px(g, 10, 30, 6, 8, cD); else if (back) px(g, 9, 30, 14, 8, cc); else { px(g, 9, 30, 4, 8, cc); px(g, 19, 30, 4, 8, cD); } }
+  // --- hair behind the body: long strands, a ponytail seen from the side, a big curly puff
+  if (style === "long" && front) { blit(g, 4, 11, HAIR_STRAND, P); blit(g, 24, 11, mirrorRows(HAIR_STRAND), P); }
+  if (style === "long" && side) blit(g, 6, 21, HAIR_SIDE_LONG, P);
+  if (style === "ponytail" && side) { px(g, 4, 13, 4, 10, H); px(g, 4, 13, 1, 8, h); px(g, 5, 23, 2, 3, H); px(g, 7, 12, 2, 3, L.bow || cD); }
+  if (style === "curly") for (let yy = 2; yy < 22; yy++) { const hw = Math.round(11 * Math.sqrt(Math.max(0, 1 - Math.pow((yy - 11) / 10, 2)))); px(g, 16 - hw, yy, hw * 2, 1, (yy * 7) % 5 ? H : d); if (hw > 2) { px(g, 16 - hw, yy, 1, 1, h); } }
+  // --- the far arm (side view)
+  if (side && !armsUp) blit(g, 9 - swing, 24, boy ? ARM_BOY_R : ARM_GIRL_R, PA);
+  // --- torso: overalls bib or a plain shirt (with trousers), or the dress
+  if (boy) {
+    let tor = side ? BOY_TORSO_SIDE : back ? BOY_TORSO_BACK : BOY_TORSO_FRONT;
+    if (L.bib === false) tor = tor.map((r, i) => i < 8 ? r.replace(/[nNlc]/g, "s") : r);      // no bib: the shirt runs down to the trousers
+    blit(g, side ? 10 : 9, 22, tor, P);
+    if (L.apron) {                                                               // a work apron over the shirt
+      if (front) { px(g, 11, 25, 10, 13, ap); px(g, 11, 25, 1, 12, apL); px(g, 20, 25, 1, 12, apD); px(g, 11, 37, 10, 1, apD); px(g, 12, 22, 1, 3, apD); px(g, 19, 22, 1, 3, apD); }
+      else if (side) { px(g, 17, 25, 5, 13, ap); px(g, 21, 25, 1, 12, apD); px(g, 17, 37, 5, 1, apD); }
+      else { px(g, 15, 30, 2, 2, apD); }
+    }
+  } else {
+    blit(g, side ? 10 : 9, 22, side ? GIRL_TORSO_SIDE : back ? GIRL_TORSO_BACK : GIRL_TORSO_FRONT, P);
+    const [k1, k2, k3] = L.skirt ? tones(L.skirt) : [s, S, t];
+    for (let y = 31; y < 41; y++) {
+      const hem = y === 40;
+      if (!side) {
+        const w = 14 + Math.floor((y - 31) * 0.5), x0 = 16 - Math.floor(w / 2);
+        px(g, x0, y, w, 1, hem ? k2 : k1); px(g, x0 + w - 2, y, 2, 1, k2); if (!hem) px(g, x0, y, 1, 1, k3);
+        if (y >= 33 && y < 39 && !(y & 1)) { px(g, x0 + 1, y, 1, 1, k2); px(g, x0 + w - 3, y, 1, 1, k2); }
+        if (y === 39) for (let q = x0 + 1; q < x0 + w - 2; q += 2) px(g, q, y, 1, 1, k3);
+      } else {
+        const w = 12 + Math.floor((y - 31) * 0.5), x0 = 22 - w;
+        px(g, x0, y, w, 1, hem ? k2 : k1); px(g, x0 + w - 1, y, 1, 1, k2); if (!hem) px(g, x0, y, 1, 1, k3);
+        if (y >= 33 && y < 39 && !(y & 1)) px(g, x0 + 2, y, 1, 1, k2);
+        if (y === 39) for (let q = x0 + 1; q < x0 + w - 1; q += 2) px(g, q, y, 1, 1, k3);
+      }
+    }
+    if (apron && !back) {
+      const ax = side ? 14 : 11, aw = side ? 8 : 10, band = apron === true ? RED : apD;
+      px(g, ax, 31, aw, 8, ap); px(g, ax, 32, 1, 5, apL); px(g, ax + aw - 1, 32, 1, 5, apD);
+      px(g, ax, 37, aw, 1, apD); px(g, ax, 38, aw, 1, apron === true ? APRON_X : shade(apron, 0.6));
+      px(g, ax, 31, aw, 1, band);
+      if (apron === true) for (let y = 33; y < 37; y += 3) for (let q = ax + 2; q < ax + aw - 1; q += 3) px(g, q, y, 1, 1, APRON_DOT);
+    } else if (apron && back) { px(g, 14, 32, 2, 6, apron === true ? RED : apD); px(g, 17, 32, 2, 5, apron === true ? RED : apD); }
+  }
+  // --- coats, vests and jackets over the shirt
+  const over = L.coat || L.vest || L.jacket;
+  if (over) {
+    const [v, vD, vL] = tones(over), bottom = L.coat ? 30 : L.jacket ? 32 : 31;
+    if (front) { px(g, 9, 22, 4, bottom - 22, v); px(g, 9, 22, 1, bottom - 22, vL); px(g, 19, 22, 4, bottom - 22, vD); px(g, 13, 22, 1, 3, vL); px(g, 18, 22, 1, 3, vD); if (L.jacket) { px(g, 12, 22, 2, 2, vL); px(g, 18, 22, 2, 2, vL); } }
+    else if (back) { px(g, 9, 22, 14, bottom - 22, v); px(g, 9, 22, 1, bottom - 22, vL); px(g, 21, 22, 2, bottom - 22, vD); if (L.coat) px(g, 15, 26, 1, 4, vD); }
+    else { px(g, 10, 22, 8, bottom - 22, v); px(g, 10, 22, 1, bottom - 22, vL); px(g, 17, 22, 1, bottom - 22, vD); if (L.jacket) px(g, 16, 22, 2, 2, vL); }
+  }
+  // --- arms
+  const armL = boy ? ARM_BOY_L : ARM_GIRL_L, armR = boy ? ARM_BOY_R : ARM_GIRL_R;
+  if (armsUp) {
+    if (!side) {
+      const up = covers ? (boy ? ARM_UP_BOY_HAT : ARM_UP_GIRL_HAT) : boy ? ARM_UP_BOY_L : ARM_UP_GIRL_L, uy = covers ? 4 : 9;
+      blit(g, 5, uy, up, PA); blit(g, 24, uy, mirrorRows(up), PA); px(g, 8, 22, 1, 2, PA.s); px(g, 23, 22, 1, 2, PA.S);
+    }
+  } else if (!side) {
+    blit(g, 6, 23 + swing, back ? mirrorRows(armR) : armL, PA);
+    blit(g, 23, 23 - swing, back ? mirrorRows(armL) : armR, PA);
+  } else blit(g, 17 + swing, 23, boy ? ARM_BOY_SIDE : ARM_GIRL_SIDE, PA);
+  // --- little touches on the front of the body
+  const ex = L.extras || [];
+  if (!back) {
+    const sx = side ? 6 : 0;
+    if (ex.includes("badge")) { const bx = side ? 18 : 11; px(g, bx + 1, 25, 1, 1, "#f2c744"); px(g, bx, 26, 3, 1, "#f2c744"); px(g, bx + 1, 27, 1, 1, "#d9a828"); px(g, bx, 28, 1, 1, "#d9a828"); px(g, bx + 2, 28, 1, 1, "#d9a828"); }
+    if (ex.includes("bowtie") && front) { const [q, qD] = tones(L.tieColor || "#c94a5a"); px(g, 13, 22, 2, 3, q); px(g, 17, 22, 2, 3, q); px(g, 15, 23, 2, 1, qD); }
+    if (ex.includes("tie") && front) { const [q, qD] = tones(L.tieColor || "#c94a5a"); px(g, 15, 23, 2, 6, q); px(g, 16, 23, 1, 6, qD); px(g, 15, 22, 2, 1, qD); }
+    if (ex.includes("scarf")) { const [q, qD, qL] = tones(L.scarf || "#e0b030"); if (front) { px(g, 10, 21, 12, 3, q); px(g, 10, 21, 12, 1, qL); px(g, 18, 24, 3, 6, q); px(g, 18, 29, 3, 1, qD); } else { px(g, 12, 21, 10, 3, q); px(g, 12, 21, 10, 1, qL); } }
+    if (ex.includes("necklace") && front) for (let q = 12; q < 20; q += 2) px(g, q, 23 + (q === 14 || q === 16 ? 1 : 0), 1, 1, "#f4ecdf");
+    if (ex.includes("lei") && front) { const fl = ["#ff7eb6", "#ffe066", "#ff8f5a", "#c86ee0", "#ffffff"]; for (let i = 0; i < 6; i++) px(g, 10 + i * 2, 22 + (i === 0 || i === 5 ? 0 : 1) + (i === 2 || i === 3 ? 1 : 0), 2, 2, fl[i % 5]); }
+    if (ex.includes("chain") && front) for (const [q, r] of [[13, 23], [14, 24], [15, 25], [16, 25], [17, 24], [18, 23]]) px(g, q, r, 1, 1, "#f2c744");
+    if (ex.includes("stethoscope") && front) { px(g, 12, 22, 1, 6, "#8a8f9a"); px(g, 19, 22, 1, 4, "#8a8f9a"); px(g, 11, 28, 3, 2, "#c8ccd4"); }
+    if (ex.includes("belt") && boy) { px(g, side ? 10 : 9, 30, side ? 12 : 14, 1, "#4a2e1c"); if (front) px(g, 15, 30, 2, 1, CLASP); }
+    if (ex.includes("satchel")) { if (front) { for (let q = 0; q < 11; q++) px(g, 10 + q, 22 + q, 1, 1, "#6a4228"); px(g, 18, 31, 6, 5, "#a5713f"); px(g, 18, 31, 6, 2, "#c88a52"); px(g, 20, 33, 2, 1, CLASP); } else { px(g, 17, 31, 6, 5, "#a5713f"); px(g, 17, 31, 6, 2, "#c88a52"); px(g, 14, 22, 1, 9, "#6a4228"); } }
+    if (ex.includes("toolbelt") && boy) { px(g, side ? 10 : 9, 30, side ? 12 : 14, 2, "#7a4a24"); if (front) { px(g, 10, 31, 3, 3, "#a5713f"); px(g, 20, 31, 2, 4, "#9aa4b0"); } else px(g, 19, 31, 3, 3, "#a5713f"); }
+    void sx;
+  } else if (ex.includes("satchel")) { for (let q = 0; q < 11; q++) px(g, 21 - q, 22 + q, 1, 1, "#6a4228"); }
+  // --- long hair down the back, the head, the hair-do, the face, the hat
+  if (style === "long" && back) blit(g, 7, 23, HAIR_BACK_LONG, P);
+  const base = side ? (headBoy ? HEAD_SIDE_BOY : HEAD_SIDE_GIRL) : back ? (headBoy ? HEAD_BACK_BOY : HEAD_BACK_GIRL) : headBoy ? HEAD_FRONT_BOY : HEAD_FRONT_GIRL;
+  const head = styleHead(style === "bun" && back ? HEAD_BACK_BOY : base, style, view);
+  if (!covers) blit(g, 7, 3, head, P);
+  else { blit(g, 7, 11, head.slice(HAIRLINE, HAIRLINE + 1), PSHADOW); blit(g, 7, 12, head.slice(HAIRLINE + 1), P); }
+  if (style === "ponytail" && back) { px(g, 14, 20, 4, 10, H); px(g, 14, 20, 1, 9, h); px(g, 15, 30, 2, 2, H); px(g, 14, 19, 4, 2, L.bow || S); }
+  if (style === "bun" && !covers) {         // hair up in a round bun on top (seen from behind, the back of the head is short)
+    const bun = ["..HHHH..", ".HhhHHH.", "HhxhHHdH", "HhhHHHdH", "HHHHHdHH", ".HHHHHH."];
+    if (side) blit(g, 5, 3, bun, P); else blit(g, 12, 1, bun, P);
+  }
+  if (!covers && L.bow) { if (front) blit(g, 17, 3, BOW_SMALL, P); else if (back) blit(g, 9, 3, BOW_SMALL, P); else blit(g, 6, 4, BOW_TINY, P); }
+  drawFace(g, L, view, P);
+  if (hatOn) drawHat(g, L, view);
+  if (armsUp && side) { px(g, 15, 4, 5, 19, OUT); blit(g, 16, 5, boy ? ARM_UP_BOY_SIDE : ARM_UP_GIRL_SIDE, PA); }
   g.setTransform(1, 0, 0, 1, 0, 0);
   outline(c, OUT);
   const done = facing === "left" ? mirrored(key, c) : c;
@@ -669,5 +925,5 @@ function archSprite() {
   });
 }
 
-Object.assign(window.ART, { cowSprite, priestSprite, archSprite, heldTool, farmerSprite, blitGrid: blit });
+Object.assign(window.ART, { cowSprite, priestSprite, archSprite, heldTool, farmerSprite, personSprite, LOOKS, blitGrid: blit });
 })();
