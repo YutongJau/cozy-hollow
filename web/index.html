@@ -35,7 +35,9 @@
     <span id="can-top"></span>
     <span id="online"></span>
   </div>
-  <div id="toolbar"><div class="slots"></div><div id="xpbar" title="farming experience"><div class="fill"></div><span class="label"></span></div></div>
+  <div id="toolbar"><div class="slots"></div><div id="xpbar" title="farming experience"><div class="fill"></div><span class="label"></span></div><div id="hpbar" class="hidden" title="health"><div class="fill"></div><span class="label"></span></div><div id="buffs"></div></div>
+  <button id="wish" class="hidden">★ Make a wish! (V)</button>
+  <div id="derby" class="hidden"></div>
   <div id="side">
     <div class="panel" id="farmers"><h3>Farmers</h3><ul></ul></div>
     <div class="panel" id="quest"><h3>Notice board</h3><p></p></div>
@@ -44,7 +46,7 @@
   <div id="here"></div>
   <div id="toast" class="hidden"></div>
   <div id="chatbox" class="hidden"><span>say&gt;</span><input id="chat" maxlength="160" autocomplete="off"></div>
-  <div id="hint">WASD move · E use tool · 1-9 pick tool · T chat · I bag · J journal · H help · M music</div>
+  <div id="hint">WASD move · E use · 1-9 pick · U eat · R ride · C craft · T chat · I bag · J journal · H help · M music</div>
   <div id="menu" class="hidden"><div class="box"><button class="xbtn" title="close">×</button><h2></h2><div class="body"></div><div class="foot"></div></div></div>
 </div>
 <script src="art-core.js"></script>
@@ -55,6 +57,8 @@
 <script src="art-farmers.js"></script>
 <script src="art-interior.js"></script>
 <script src="art-world.js"></script>
+<script src="art-items.js"></script>
+<script src="art-life.js"></script>
 <script src="game.js"></script>
 </body>
 </html>

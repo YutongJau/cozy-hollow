@@ -13,6 +13,7 @@ import time
 import world as W
 import areas as AR
 import pingall
+from valley import crafting as CR
 
 STAGE_GLYPHS = [(".", "."), (",", ","), ("v", "v"), ("Y", "Y")]
 TREE_GLYPH = ("♣", "T")
@@ -24,6 +25,7 @@ TERRAIN_GLYPHS = {
     "l": ("¡", "i"), "b": ("═", "b"), "w": ("◎", "O"),
     "N": ("▓", "N"), "s": ("●", "s"), "p": ("≡", "p"), "g": ("†", "g"),
     "d": ("·", "."), "u": ("♣", "u"), "G": ("╫", "="), "Y": ("Y", "Y"),
+    "@": ("▓", "#"), "H": ("═", "="),
 }
 PROP_STYLE = {  # (256-colour fg, 8-colour fg, bold)
     "B": (137, "yellow", False), "c": (180, "yellow", False), "h": (220, "yellow", True),
@@ -42,8 +44,21 @@ AREA_GLYPHS = {
     "F": ("\u25ce", "O", 45, 245, "cyan", True), "E": ("\u2229", "n", 252, None, "white", True), "L": ("=", "=", 137, None, "yellow", False),
     "V": ("\u2584", "v", 137, 25, "yellow", True), "Q": ("\u2584", "Q", 196, None, "red", True), "U": ("H", "H", 220, 236, "yellow", True),
     "D": ("\u25bc", "v", 220, 233, "yellow", True), "I": ("\u2248", "~", 45, 94, "cyan", True), "J": ("\u25a0", "J", 203, None, "red", True),
-    "O": ("o", "o", 137, None, "yellow", True),
+    "O": ("o", "o", 137, None, "yellow", True), "Z": ("\u25a0", "Z", 178, None, "yellow", True),
 }
+# the folk and creatures of the valley: (unicode, ascii, 256-colour fg, 8-colour fg)
+NPC_GLYPH = ("\u263a", "@")
+CREATURES = {
+    "chicken": ("\u00e7", "c", 255, "white"), "dog": ("\u00f0", "d", 173, "yellow"), "cat": ("\u0109", "k", 247, "white"),
+    "slime": ("\u2299", "s", 76, "green"), "blue_slime": ("\u2299", "s", 45, "cyan"), "bat": ("\u028c", "^", 135, "magenta"),
+    "rock_crab": ("\u0436", "x", 167, "red"), "ghost": ("\u03a9", "G", 252, "white"), "slime_king": ("\u25c9", "O", 46, "green"),
+    "rabbit": ("r", "r", 180, "yellow"), "quail": ("q", "q", 137, "yellow"), "deer": ("\u00a5", "Y", 173, "yellow"), "boar": ("\u00df", "b", 95, "red"),
+}
+HEN_C256 = {"white": 255, "brown": 173, "black": 240}
+MACHINE_GLYPHS = {"cheese_press": "\u2565", "preserves_jar": "\u25d8", "mayo_machine": "\u25d9", "bee_house": "\u2591",
+                  "rock_tumbler": "\u25cd", "animal_trap": "\u2302", "craft_table": "\u2564", "tailor_table": "\u2566"}
+FEST_NAMES = {"hoedown": "Spring Hoedown", "rodeo": "Rodeo Roundup", "fair": "Livestock Fair", "fallfest": "Fallfest",
+              "derby": "Frost Fishing Derby", "feast": "Winter Feast"}
 BUILDING_C256 = {"store": 71, "saloon": 130, "hall": 124, "museum": 250, "clinic": 255, "smith": 243, "bakery": 218, "post": 74,
                  "carpenter": 179, "cottage": 222, "cottage2": 158, "cottage3": 183, "fishshop": 109, "lighthouse": 196, "cabin": 137,
                  "guild": 245, "mine": 236, "volcano": 59, "tiki": 179, "assay": 180, "wsaloon": 131, "bank": 252, "sheriff": 137, "stable": 130}
@@ -139,7 +154,7 @@ def facing_name(f):
 
 SEASON_ICON = {"spring": "✿", "summer": "☀", "fall": "☘", "winter": "❄"}
 WEATHER_TEXT = {"sun": "Sunny", "rain": "Raining", "snow": "Snowing"}
-HINT = "arrows/WASD move  E act  F fish  X clear  1-9 hand  Tab next  T chat  I bag  J journal  ? help  Q quit"
+HINT = "WASD move  E act  F fish  X clear  1-9 hand  I bag  U eat  C craft  R ride  J journal  T chat  ? help  Q quit"
 
 
 def wrap(text, width):
@@ -213,7 +228,14 @@ class Client:
         self.state = None
         self.me = None
         self.tiles = {}
-        self.map = W.build_map()
+        self.base_map = W.build_map()
+        self.map = [r for r in self.base_map]
+        self.dyn = {}                 # generated places (the Depths, mystery islands): loc -> rows
+        self.dyn_titles = {}
+        self.amaps = {}               # the valley's maps with land edits applied
+        self.map_sig = None
+        self.star = None              # (id, until) while a shooting star is up
+        self.mg = None                # a festival minigame in progress
         self.farm = "Cozy Hollow"
         self.log = []                 # (text, style)
         self.toast = None             # (text, until, style)
@@ -265,6 +287,7 @@ class Client:
                 self.state = msg
                 self.me = msg.get("me")
                 self.farm = msg.get("farm", self.farm)
+                self.refresh_maps(msg)
                 tiles = {}
                 for k, d in msg.get("tiles", {}).items():
                     x, y = k.split(",")
@@ -274,6 +297,9 @@ class Client:
                     self.menu["storage"] = sorted(msg["storage"].items())
             elif t == "welcome":
                 self.farm = msg.get("farm", self.farm)
+                for a in msg.get("dyn", []):
+                    self.dyn[a["name"]], self.dyn_titles[a["name"]] = a["map"], a.get("title", a["name"])
+                self.map_sig = None
                 for e in msg.get("log", []):
                     self.log.append((time.strftime("%H:%M", time.localtime(e["ts"])) + " " + e["text"], "log"))
                 self.add_log("Welcome to %s, %s! Press ? for help." % (self.farm, self.name), "good", toast=True)
@@ -293,6 +319,18 @@ class Client:
                              toast=(msg.get("sender") != self.name))
             elif t == "open":
                 self.open_menu(msg)
+            elif t == "area":
+                self.dyn[msg["name"]], self.dyn_titles[msg["name"]] = msg["map"], msg.get("title", msg["name"])
+                self.map_sig = None
+            elif t == "star":
+                self.star = (msg.get("id"), time.time() + 3.5)
+                self.add_log("A shooting star streaks across the sky! Press V to make a wish.", "good", toast=True)
+            elif t == "song":
+                self.add_log("\u266a Rowan plays \"%s\" on the fiddle." % str(msg.get("id", "")).replace("_", " "), "good", toast=True)
+            elif t == "ouch":
+                self.add_log("Ouch! -%d health" % msg.get("n", 0), "warn", toast=True)
+            elif t == "minigame":
+                self.start_minigame(msg.get("game"), msg.get("seed", 1))
             elif t == "fish_bite":
                 self.start_fishing(msg)
             elif t == "error":
@@ -411,6 +449,17 @@ class Client:
             self.send(dict(t="fish_start"))
         elif key in ("x", "X"):
             self.send(dict(t="clear"))
+        elif key in ("u", "U"):
+            self.send(dict(t="eat"))
+        elif key in ("r", "R"):
+            self.send(dict(t="ride"))
+        elif key in ("c", "C"):
+            self.send(dict(t="craft_open"))
+        elif key in ("v", "V"):
+            if self.star and self.star[1] > time.time():
+                self.send(dict(t="wish", id=self.star[0]))
+            else:
+                self.add_log("No shooting star right now - watch the night sky.", "info", toast=True)
         elif key and len(key) == 1 and key in "123456789":
             self.send(dict(t="select", i=int(key) - 1))
         elif key == "TAB":
@@ -563,6 +612,9 @@ class Client:
     def keys_journal(self, key):
         if key in ("ESC", "q", "ENTER", "j", "J", " "):
             self.mode = "play"
+        elif key in ("f", "F"):
+            self.mode = "play"
+            self.send(dict(t="friends"))
 
     def keys_help(self, key):
         if key in ("ESC", "q", "ENTER", "?", " "):
@@ -580,6 +632,8 @@ class Client:
         elif inv and key == "ENTER":
             self.send(dict(t="select", i=m["cursor"]))
             self.mode = "play"
+        elif inv and key in ("u", "U"):
+            self.send(dict(t="eat", item=inv[min(m["cursor"], len(inv) - 1)][0]))
 
     def keys_fishing(self, key):
         f = self.fish
@@ -611,8 +665,13 @@ class Client:
             self.mode = "proposal"
             self.menu = dict(partner=msg.get("partner"), answered=False)
         elif menu == "close":
-            if self.mode == "proposal":
+            if self.mode in ("proposal", "list"):
                 self.mode = "play"
+        elif menu == "list":
+            old = self.menu if self.mode == "list" and self.menu.get("id") == msg.get("id") else {}
+            self.mode = "list"
+            self.menu = dict(msg, cursor=old.get("cursor", -1), scroll=old.get("scroll", 0))
+            self.list_fix_cursor(0)
         elif menu == "barn":
             cur = self.menu.get("cursor", 0) if self.mode == "barn" else 0
             self.mode = "barn"
@@ -661,6 +720,9 @@ class Client:
         if self.mode == "fishing" and self.fish:
             self.update_fishing(dt)
             self.dirty = True
+        if self.mode == "minigame" and self.mg:
+            self.update_minigame(dt)
+            self.dirty = True
         self.anim_acc += dt
         if self.anim_acc < 0.12:
             return
@@ -702,6 +764,373 @@ class Client:
         hh, mm = int(h), int((h - int(h)) * 60)
         phase = "night" if h < 5.5 else "sunrise" if h < 7.5 else "day" if h < 17 else "sunset" if h < 19.5 else "dusk" if h < 20.5 else "night"
         return "%d:%02d%s %s" % (((hh + 11) % 12) + 1, mm, "pm" if hh >= 12 else "am", phase)
+
+    # ------------------------------------------------------------------ maps that change: dug ponds, coops, the Depths
+    def refresh_maps(self, st):
+        sig = json.dumps([st.get("edits"), st.get("dyn"), sorted(self.dyn)], sort_keys=True)
+        if sig == self.map_sig:
+            return
+        self.map_sig = sig
+        edits = st.get("edits") or {}
+
+        def apply(rows, loc):
+            rows = list(rows)
+            for k, ch in (edits.get(loc) or {}).items():
+                x, y = map(int, k.split(","))
+                if 0 <= y < len(rows) and 0 <= x < len(rows[y]):
+                    rows[y] = rows[y][:x] + ch + rows[y][x + 1:]
+            return rows
+        self.map = apply(self.base_map, "farm")
+        self.amaps = {loc: apply(rows, loc) for loc, rows in AR.MAPS.items()}
+        self.static_cache.clear()
+
+    def rows_of(self, loc):
+        return self.amaps.get(loc) or self.dyn.get(loc) or AR.MAPS.get(loc) or []
+
+    def is_area(self, loc):
+        return loc in AR.MAPS or loc in self.dyn
+
+    def area_title(self, loc):
+        return AR.AREA_NAMES.get(loc) or self.dyn_titles.get(loc) or loc
+
+    def buildings_in(self, loc):
+        return list(AR.BUILDINGS.get(loc, [])) + list(((self.state or {}).get("xb") or {}).get(loc, []))
+
+    # ------------------------------------------------------------------ the folk, the animals and the monsters
+    def creature(self, kind, bg, extra=0):
+        u, a, c256, c8 = CREATURES.get(kind, ("?", "?", 255, "white"))
+        return (a if self.ascii else u), (self.pal.pair(c256, bg) if self.pal.c256 else self.pal.pair(c8)) | curses.A_BOLD | extra
+
+    def entities_at(self, loc):
+        """Everything that walks, hops, flutters or waits around in this place: [(x, y, glyph, attr-maker, label)]."""
+        st = self.state or {}
+        out = []
+        looks = AR.NPCS
+        for n in st.get("npcs", []):
+            if n["loc"] == loc:
+                look = looks.get(n["n"], ("boy", "white", "none"))
+                out.append((n["x"], n["y"], "npc", look[1], n["n"], n.get("b")))
+        if loc == "farm":
+            for c in st.get("chickens", []):
+                out.append((c["x"], c["y"], "chicken", c.get("c", "white"), c["name"], "egg!" if c.get("egg") else None))
+        for pt in st.get("pets", []):
+            if pt["loc"] == loc:
+                out.append((pt["x"], pt["y"], pt["kind"], None, pt["name"], None))
+        for pl in st.get("players", []):
+            c = pl.get("companion")
+            if c and pl.get("online") and c.get("loc") == loc:
+                out.append((c["x"], c["y"], c["kind"], "pal", c["name"], None))
+        for m in (st.get("mobs") or {}).get(loc, []):
+            out.append((m["x"], m["y"], m["k"], "hit" if m.get("h") else None, None, None))
+        for c in (st.get("critters") or {}).get(loc, []):
+            out.append((c["x"], c["y"], c["k"], None, None, None))
+        return out
+
+    def draw_entities(self, loc, cam_x, cam_y, ox, oy, vw_eff, vh_eff, bgfn, near):
+        P, rich, B = self.pal.pair, self.pal.c256, curses.A_BOLD
+        st = self.state or {}
+        for k, key in ((st.get("bugs") or {}).get(loc) or {}).items():
+            x, y = map(int, k.split(","))
+            if cam_x <= x < cam_x + vw_eff and cam_y <= y < cam_y + vh_eff:
+                it = W.ITEMS[key]
+                blink = curses.A_BOLD if (self.frame + x) % 6 < 4 else curses.A_DIM
+                self.put(oy + y - cam_y, ox + x - cam_x, self.g(("\u00a4", "*")), (P(C256.get(it["color"], 226), bgfn(x, y)) if rich else P(it["color"])) | blink)
+        for k in (st.get("digs") or {}).get(loc) or []:
+            x, y = map(int, k.split(","))
+            if cam_x <= x < cam_x + vw_eff and cam_y <= y < cam_y + vh_eff:
+                self.put(oy + y - cam_y, ox + x - cam_x, self.g(("\u2234", "%")), (P(137, bgfn(x, y)) if rich else P("yellow")) | B)
+        labels = []
+        for (x, y, kind, extra, name, bubble) in self.entities_at(loc):
+            if not (cam_x <= x < cam_x + vw_eff and cam_y <= y < cam_y + vh_eff):
+                continue
+            sy, sx = oy + y - cam_y, ox + x - cam_x
+            if kind == "npc":
+                attr = (P(C256.get(extra, 255), bgfn(x, y)) if rich else P(extra if extra in FG else "white")) | B
+                self.put(sy, sx, self.g(NPC_GLYPH), attr)
+                if bubble:
+                    labels.append((sy, sx, bubble, attr | curses.A_REVERSE))
+                elif near(x, y):
+                    labels.append((sy, sx, name, attr | curses.A_DIM))
+            elif kind == "chicken":
+                gl, attr = self.creature("chicken", bgfn(x, y))
+                if rich:
+                    attr = P(HEN_C256.get(extra, 255), bgfn(x, y)) | B
+                self.put(sy, sx, gl, attr | (curses.A_REVERSE if bubble else 0))
+            else:
+                gl, attr = self.creature(kind, bgfn(x, y), curses.A_REVERSE if extra == "hit" else 0)
+                if extra == "pal" and rich:
+                    attr = P(213, bgfn(x, y)) | B
+                self.put(sy, sx, gl, attr)
+                if name and near(x, y):
+                    labels.append((sy, sx, name, attr | curses.A_DIM))
+        b = st.get("balloon")
+        if b and b.get("loc") == loc:
+            x, y = int(round(b["x"])), int(round(b["y"]))
+            if cam_x <= x < cam_x + vw_eff and cam_y <= y - 1 < cam_y + vh_eff:
+                self.put(oy + y - 1 - cam_y, ox + x - cam_x, self.g(("\u2666", "*")), (P(196, bgfn(x, y)) if rich else P("red")) | B)
+                if cam_y <= y < cam_y + vh_eff:
+                    self.put(oy + y - cam_y, ox + x - cam_x, self.g(("\u25a0", "#")), (P(220, bgfn(x, y)) if rich else P("yellow")) | B)
+        for sy, sx, text, attr in labels:
+            text = " %s " % text
+            lx = max(ox, min(ox + vw_eff - len(text), sx - len(text) // 2))
+            self.put(sy - 1 if sy - 1 >= oy else sy + 1, lx, text, attr)
+
+    @staticmethod
+    def faced(me):
+        if not me:
+            return lambda x, y: False
+        fx, fy = me["x"] + me["facing"][0], me["y"] + me["facing"][1]
+        return lambda x, y: (x, y) == (fx, fy)
+
+    def machine_cell(self, m, bg):
+        """A farm machine: its glyph in its colour; ready ones light up."""
+        kind, phase = m[0], m[1]
+        it = W.ITEMS[kind]
+        attr = (self.pal.pair(C256.get(it["color"], 255), bg) if self.pal.c256 else self.pal.pair(it["color"])) | curses.A_BOLD
+        if phase == 2:
+            attr |= curses.A_REVERSE
+        return (MACHINE_GLYPHS.get(kind, "M") if not self.ascii else "M"), attr
+
+    def ahead_extra(self, loc, fx, fy):
+        """Who or what is on the tile you face (a villager, a hen, a machine, a bug, a monster), or None."""
+        st = self.state or {}
+        sel = self.me["inventory"][self.me["selected"]][0] if self.me and self.me["inventory"] else None
+        for n in st.get("npcs", []):
+            if n["loc"] == loc and (n["x"], n["y"]) == (fx, fy):
+                if n["n"] == "Mayor Hazel" and st.get("festival") and loc == "town":
+                    return "Mayor Hazel - E for the %s!" % FEST_NAMES.get(st["festival"], "festival")
+                giftable = sel and W.ITEMS[sel]["kind"] not in ("gear", "key", "weapon", "machine", "ammo", "treat") and sel not in W.TOOLS
+                return "%s - E to chat%s." % (n["n"], (", E again to give your " + W.ITEMS[sel]["name"]) if giftable else "")
+        for pt in st.get("pets", []):
+            if pt["loc"] == loc and (pt["x"], pt["y"]) == (fx, fy):
+                return "%s the %s - E to pet." % (pt["name"], pt["kind"])
+        if loc == "farm":
+            for c in st.get("chickens", []):
+                if (c["x"], c["y"]) == (fx, fy):
+                    return "%s the chicken - %s" % (c["name"], "E to collect an egg!" if c.get("egg") else "no egg yet.")
+            d = self.tiles.get((fx, fy), {})
+        else:
+            d = ((st.get("areas") or {}).get(loc) or {}).get("%d,%d" % (fx, fy)) or {}
+        if d.get("m"):
+            kind, phase, out = d["m"]
+            name = W.ITEMS[kind]["name"]
+            if phase == 2:
+                return "%s - E to collect the %s!" % (name, W.ITEMS[out]["name"])
+            if phase == 1:
+                return "%s - working..." % name
+            return "%s - %s" % (name, {"craft_table": "E to craft.", "tailor_table": "E to sew and dye."}.get(kind, "hold an ingredient and press E."))
+        bug = ((st.get("bugs") or {}).get(loc) or {}).get("%d,%d" % (fx, fy))
+        if bug:
+            return "%s - %s" % (W.ITEMS[bug]["name"], "E to swing the net!" if sel == "bug_net" else "hold a bug net to catch it.")
+        if "%d,%d" % (fx, fy) in ((st.get("digs") or {}).get(loc) or []):
+            return "Something wriggles in the ground - dig it up with the hoe."
+        for m in (st.get("mobs") or {}).get(loc, []):
+            if (m["x"], m["y"]) == (fx, fy):
+                return "A monster! Hold a weapon and press E."
+        for c in (st.get("critters") or {}).get(loc, []):
+            if (c["x"], c["y"]) == (fx, fy):
+                return "Wild game - a bow, rifle or slingshot can bag it."
+        if loc.startswith("deep") and 0 <= fy < len(self.rows_of(loc)) and self.rows_of(loc)[fy][fx:fx + 1] == "Z":
+            return "A treasure chest - E to open it."
+        return None
+
+    # ------------------------------------------------------------------ list windows (crafting, shops, the museum, town projects...)
+    def list_fix_cursor(self, step):
+        rows = self.menu.get("rows") or []
+        ok = [i for i, r in enumerate(rows) if r.get("ok") and r.get("act")]
+        if not ok:
+            self.menu["cursor"] = -1
+            return
+        cur = self.menu.get("cursor", -1)
+        if cur not in ok:
+            self.menu["cursor"] = ok[0]
+        elif step:
+            self.menu["cursor"] = ok[(ok.index(cur) + step) % len(ok)]
+
+    def keys_list(self, key):
+        m = self.menu
+        if key in ("ESC", "q"):
+            self.mode = "play"
+        elif key in ("UP", "w", "W", "k"):
+            self.list_fix_cursor(-1)
+        elif key in ("DOWN", "s", "S", "j"):
+            self.list_fix_cursor(1)
+        elif key in ("ENTER", "e", "E", " "):
+            rows = m.get("rows") or []
+            if 0 <= m.get("cursor", -1) < len(rows):
+                self.send(rows[m["cursor"]]["act"])
+                if not m.get("keep"):
+                    self.mode = "play"
+
+    def draw_list(self, h, w):
+        m = self.menu
+        rows = m.get("rows") or []
+        bw = min(76, w - 2)
+        lines = []           # (text, attr, row index or None)
+        for i, r in enumerate(rows):
+            if r.get("section"):
+                lines.append(("", 0, None))
+                lines.append(("-- %s --" % r["section"], curses.A_BOLD | self.pal.pair("yellow"), None))
+                continue
+            icon = self.item_glyph(r["key"]) if r.get("key") in W.ITEMS else (self.g(NPC_GLYPH) if r.get("npc") else self.g(("\u266a", "~")) if r.get("song") else " ")
+            right = str(r.get("right") or "")
+            label = "%s %s" % (icon, r.get("label", ""))
+            room = bw - 8 - len(right)
+            text = label[:room].ljust(room) + " " + right
+            dim = r.get("dim") or not (r.get("ok") and r.get("act"))
+            lines.append((text, curses.A_DIM if dim else 0, i))
+            if r.get("info"):
+                for ln in wrap(r["info"], bw - 10)[:2]:
+                    lines.append(("    " + ln, curses.A_DIM, i))
+        sub = wrap(m.get("sub") or "", bw - 6)
+        bh = min(h - 2, len(lines) + len(sub) + 5)
+        y, x, bh, bw = self.center_box(h, w, bh, bw, m.get("title", ""))
+        for i, ln in enumerate(sub):
+            self.put(y + 1 + i, x + 3, ln, self.pal.pair("cyan"))
+        top = y + 1 + len(sub)
+        avail = bh - 3 - len(sub)
+        cur_line = next((k for k, l in enumerate(lines) if l[2] == m.get("cursor")), 0)
+        scroll = max(0, min(cur_line - avail // 2, len(lines) - avail))
+        for k, (text, attr, idx) in enumerate(lines[scroll:scroll + avail]):
+            sel = idx is not None and idx == m.get("cursor") and not text.startswith("    ")
+            self.put(top + k, x + 2, ("> " if sel else "  ") + text, (attr | curses.A_REVERSE) if sel else attr)
+        foot = m.get("foot") or "up/down choose   Enter pick   Esc close"
+        self.put(y + bh - 2, x + 2, foot[:bw - 4], curses.A_DIM)
+
+    # ------------------------------------------------------------------ festival minigames, terminal style
+    def start_minigame(self, game, seed):
+        rng = random.Random(seed)
+        now = time.time()
+        mg = dict(game=game, t0=now + 1.5, done=False, score=0, msg="")
+        if game == "dance":
+            t, notes = now + 2.5, []
+            for _ in range(20):
+                notes.append(dict(lane=rng.randrange(4), t=t, hit=0))
+                t += 0.6 + rng.randrange(3) * 0.2
+            mg.update(notes=notes, end=t + 1.0)
+        elif game == "rodeo":
+            mg.update(pos=0.0, vel=0.0, push=0.0, push_until=0, kick=0.0, end=now + 1.5 + 15, rng=rng)
+        elif game == "apples":
+            mg.update(tries=5, hits=0, phase=rng.random() * 6)
+        self.mg = mg
+        self.mode = "minigame"
+
+    def finish_minigame(self, score):
+        mg = self.mg
+        if not mg or mg["done"]:
+            return
+        mg["done"], mg["score"] = True, max(0, min(100, int(round(score))))
+        mg["closed_at"] = time.time() + 1.6
+        self.send(dict(t="minigame_done", game=mg["game"], score=mg["score"]))
+
+    def update_minigame(self, dt):
+        mg, now = self.mg, time.time()
+        if mg["done"]:
+            if now > mg.get("closed_at", 0):
+                self.mg, self.mode = None, "play"
+            return
+        if mg["game"] == "dance":
+            for n in mg["notes"]:
+                if not n["hit"] and now - n["t"] > 0.3:
+                    n["hit"] = -1
+            if now > mg["end"]:
+                self.finish_minigame(100 * sum(1 if n["hit"] == 2 else 0.6 if n["hit"] == 1 else 0 for n in mg["notes"]) / len(mg["notes"]))
+        elif mg["game"] == "rodeo" and now > mg["t0"]:
+            if now > mg["push_until"]:
+                mg["push"] = 0.0
+            if mg["rng"].random() < 2.1 * dt:
+                mg["kick"] = (mg["rng"].random() - 0.5) * 3.2
+            mg["vel"] += (mg["kick"] + mg["pos"] * 1.4 - mg["push"] * 2.6) * dt
+            mg["vel"] *= 0.985 ** (dt * 60)
+            mg["pos"] += mg["vel"] * dt
+            if abs(mg["pos"]) > 1:
+                self.finish_minigame(100 * min(1.0, (now - mg["t0"]) / 15))
+            elif now > mg["end"]:
+                self.finish_minigame(100)
+
+    def keys_minigame(self, key):
+        mg, now = self.mg, time.time()
+        if not mg:
+            self.mode = "play"
+            return
+        if key == "ESC":
+            if mg["done"]:
+                self.mg, self.mode = None, "play"
+            else:
+                self.finish_minigame(100 * min(1.0, max(0, now - mg["t0"]) / 15) if mg["game"] == "rodeo" else 0)
+            return
+        if mg["done"]:
+            return
+        if mg["game"] == "dance":
+            lane = {"LEFT": 0, "a": 0, "A": 0, "UP": 1, "w": 1, "W": 1, "DOWN": 2, "s": 2, "S": 2, "RIGHT": 3, "d": 3, "D": 3}.get(key)
+            if lane is None:
+                return
+            best = min((n for n in mg["notes"] if not n["hit"] and n["lane"] == lane and abs(n["t"] - now) < 0.25),
+                       key=lambda n: abs(n["t"] - now), default=None)
+            if best:
+                best["hit"] = 2 if abs(best["t"] - now) < 0.1 else 1
+        elif mg["game"] == "rodeo":
+            if key in ("LEFT", "a", "A"):
+                mg["push"], mg["push_until"] = -1.0, now + 0.3
+            elif key in ("RIGHT", "d", "D"):
+                mg["push"], mg["push_until"] = 1.0, now + 0.3
+        elif mg["game"] == "apples" and key in (" ", "e", "E", "ENTER"):
+            mg["tries"] -= 1
+            if abs(math.sin(now / 0.26 + mg["phase"])) < 0.25:
+                mg["hits"] += 1
+                mg["msg"] = "Got one!"
+            else:
+                mg["msg"] = "Splash!"
+            if mg["tries"] <= 0:
+                self.finish_minigame(mg["hits"] * 20)
+
+    def draw_minigame(self, h, w):
+        mg, now = self.mg, time.time()
+        P, B = self.pal.pair, curses.A_BOLD
+        title = {"dance": "Line Dance", "rodeo": "Bull Ride", "apples": "Bob for Apples"}.get(mg["game"], "Festival")
+        y, x, bh, bw = self.center_box(h, w, 12, 72, title)
+        if mg["game"] == "dance":
+            arrows = [self.g(a) for a in (("\u2190", "<"), ("\u2191", "^"), ("\u2193", "v"), ("\u2192", ">"))]
+            hit_x = x + 8
+            for lane in range(4):
+                ly = y + 2 + lane * 2
+                self.put(ly, x + 3, arrows[lane], B)
+                self.put(ly, hit_x, "|", P("yellow") | B)
+                for n in mg["notes"]:
+                    if n["lane"] != lane:
+                        continue
+                    nx = hit_x + int((n["t"] - now) * 14)
+                    if hit_x - 2 <= nx < x + bw - 2:
+                        col = "green" if n["hit"] == 2 else "yellow" if n["hit"] == 1 else "white" if n["hit"] == 0 else "red"
+                        self.put(ly, nx, arrows[lane], P(col) | (B if n["hit"] >= 0 else curses.A_DIM))
+            got = sum(1 if n["hit"] == 2 else 0.6 if n["hit"] == 1 else 0 for n in mg["notes"])
+            status = "Press each arrow as it reaches the line!  %d%%" % (100 * got / len(mg["notes"]))
+        elif mg["game"] == "rodeo":
+            width = bw - 10
+            bar_y = y + 3
+            for i in range(width):
+                mid = abs(i - width / 2) < width * 0.15
+                self.put(bar_y, x + 5 + i, self.g(("\u2588", "#")), P("green" if mid else "red"))
+            nx = x + 5 + int((min(1, max(-1, mg["pos"])) + 1) / 2 * (width - 1))
+            self.put(bar_y - 1, nx, "v", B)
+            self.put(bar_y + 1, nx, "^", B)
+            bull = self.g(("\u2584\u2588\u2588\u2588\u2584\u2580", "_###_/"))
+            self.put(y + 6, x + bw // 2 - 3 + int(mg["pos"] * 3), bull, P("yellow") | B)
+            secs = max(0, now - mg["t0"])
+            status = "Hold on! Lean with left/right.  %.1fs / 15s" % min(15, secs) if now > mg["t0"] else "Get ready to ride Old Thunder..."
+        else:
+            width = bw - 10
+            pos = (math.sin(now / 0.26 + mg["phase"]) + 1) / 2
+            cx = x + 5 + width // 2
+            for i in range(width):
+                self.put(y + 4, x + 5 + i, self.g(("\u2248", "~")), P("blue"))
+            self.put(y + 3, cx - 6, "[" + " " * 11 + "]", P("yellow") | B)
+            self.put(y + 4, x + 5 + int(pos * (width - 1)), self.g(("\u25cf", "@")), P("red") | B)
+            status = "Space/E when the apple is in the ring!  tries %d  apples %d  %s" % (mg["tries"], mg["hits"], mg["msg"])
+        if mg["done"]:
+            status = "Score: %d!" % mg["score"]
+        self.put(y + bh - 3, x + 3, status[:bw - 6], B)
+        self.put(y + bh - 2, x + 3, "Esc stops", curses.A_DIM)
 
     # ------------------------------------------------------------------ drawing helpers
     def put(self, y, x, s, attr=0, maxw=None):
@@ -964,6 +1393,8 @@ class Client:
         if "k" in d:
             it = W.ITEMS["sprinkler"]
             return self.g((it["glyph"], it["ascii"])), P(col("sprinkler", "cyan"), bg) | B
+        if "m" in d:
+            return self.machine_cell(d["m"], bg)
         if soil:
             if rich:
                 fg = T256["fert_fg"] if d.get("f") else (T256["wet_fg"] if wet else T256["soil_fg"])
@@ -986,7 +1417,7 @@ class Client:
             return None
         terr = self.map[fy][fx]
         d = self.tiles.get((fx, fy), {})
-        if terr in "S$!+~wmBchblNspgY" or "t" in d or "g" in d or self.cow_at(fx, fy) or self.chest_at(fx, fy):
+        if terr in "S$!+~wmBchblNspgY" or "t" in d or "g" in d or "m" in d or self.cow_at(fx, fy) or self.chest_at(fx, fy) or self.ahead_extra("farm", fx, fy):
             return (fx, fy)
 
     def cow_at(self, x, y):
@@ -1046,6 +1477,10 @@ class Client:
             self.draw_inventory(h, w)
         elif self.mode == "fishing" and self.fish:
             self.draw_fishing(h, w)
+        elif self.mode == "list":
+            self.draw_list(h, w)
+        elif self.mode == "minigame" and self.mg:
+            self.draw_minigame(h, w)
         scr.refresh()
 
     def draw_status(self, w):
@@ -1064,14 +1499,22 @@ class Client:
         text = " %s%s  |  %s, day %d (year %d)  |  %s %s%s%s  |  %dg  |  %d online " % (
             icon, self.farm, st["season"].capitalize(), st["day"], st["year"], clock,
             wicon, WEATHER_TEXT[st["weather"]], night, st["coins"], online)
-        self.put(0, 0, text, bar | curses.A_BOLD)
+        me = self.my_player()
+        if me and (me.get("hp", 100) < me.get("max_hp", 100) or me.get("loc", "").startswith(("mine", "deep"))):
+            text += " %s%d/%d " % (self.g(("\u2665", "HP ")), me.get("hp", 100), me.get("max_hp", 100))
+        buffs = (self.me or {}).get("buffs") or {}
+        if buffs:
+            text += " " + " ".join("%s %s" % (k, W.fmt_duration(v)) for k, v in buffs.items()) + " "
+        if st.get("festival"):
+            text += " \u2605 %s today! " % FEST_NAMES.get(st["festival"], "Festival")
+        self.put(0, 0, text[:w], bar | curses.A_BOLD)
 
     INTERIOR_GLYPH = {"#": ("\u2588", "#", "yellow", 94), "W": ("\u2592", "W", "cyan", 110), ".": ("\u00b7", ".", "yellow", 137),
                       "r": ("\u2592", "r", "red", 160), "x": ("\u2564", "x", "yellow", 179), "b": ("\u2588", "b", "red", 203),
                       "t": ("\u2550", "t", "yellow", 179), "c": ("\u25a0", "c", "yellow", 214), "f": ("\u2593", "f", "red", 208),
                       "F": ("\u2593", "F", "yellow", 220), "k": ("\u2261", "k", "magenta", 135), "p": ("\u2663", "p", "green", 34),
                       "S": ("\u2550", "S", "yellow", 179), "q": ("@", "@", "green", 82), "h": ("\u2261", "h", "yellow", 220), "o": ("\u2550", "o", "yellow", 137),
-                      "n": ("@", "@", "cyan", 51), "d": ("\u25d8", "d", "cyan", 117), "a": ("\u03a0", "a", "white", 250), "i": ("\u25d9", "i", "yellow", 137)}
+                      "n": ("\u2550", "=", "yellow", 179), "d": ("\u25d8", "d", "cyan", 117), "a": ("\u03a0", "a", "white", 250), "i": ("\u25d9", "i", "yellow", 137)}
 
     def draw_interior(self, y0, x0, vh, vw, loc):
         rows = W.INTERIORS.get(loc, [])
@@ -1093,6 +1536,7 @@ class Client:
                 else:
                     attr = (P(col256, floor_bg) if self.pal.c256 else P(col8)) | curses.A_BOLD
                 self.put(oy + y, ox + x, gl, attr)
+        self.draw_entities(loc, 0, 0, ox, oy, w, h, lambda x, y: floor_bg, self.faced(self.my_player()))
         for p in sorted(st["players"], key=lambda p: p["name"] == self.name):
             if not p["online"] or p.get("loc", "farm") != loc:
                 continue
@@ -1105,32 +1549,35 @@ class Client:
                 text = " %s " % label
                 attr = P(W.PLAYER_COLORS[p["color"] % len(W.PLAYER_COLORS)]) | curses.A_BOLD
                 self.put(sy - 2, max(ox, sx - len(text) // 2), text, (attr | curses.A_REVERSE) if p.get("bubble") else attr | curses.A_DIM)
-        where = ("%s's %s" % (AR.KEEPERS[loc], {"wsaloon": "saloon", "assay": "general store", "hall": "town hall", "store": "mercantile",
-                                                  "post": "post office", "smith": "smithy", "fishshop": "fish shop", "cabin": "cabin"}.get(loc, loc))) if loc in AR.KEEPERS else "the " + loc
+        where = W.ROOM_TITLES.get(loc, "the " + loc)
         self.put(oy + h + 1, ox, ("Inside %s - walk onto the doorway to go out." % where)[:vw], curses.A_DIM)
 
     def area_ground_bg(self, loc, night):
         if not self.pal.c256:
             return -1
-        idx = {"frontier": 173, "mine1": 236, "mine2": 236, "mine3": 236}.get(loc) or THEME["summer" if loc == "island" else self.state["season"]]["grass"]
+        idx = 236 if loc.startswith(("mine", "deep")) else {"frontier": 173}.get(loc) or THEME["summer" if loc in ("island", "mystery") else self.state["season"]]["grass"]
         return NIGHT_BG.get(idx, idx) if night else idx
 
     def draw_area(self, y0, x0, vh, vw, loc):
         """The valley's other places: the same idea as the farm map, glyph by glyph, plus buildings with their names."""
         st, me = self.state, self.my_player()
-        rows, P, rich, B = AR.MAPS[loc], self.pal.pair, self.pal.c256, curses.A_BOLD
+        rows, P, rich, B = self.rows_of(loc), self.pal.pair, self.pal.c256, curses.A_BOLD
+        if not rows:
+            self.put(y0 + 1, x0 + 2, "Sailing...", curses.A_DIM)
+            return
         mw, mh = len(rows[0]), len(rows)
         px, py = (me["x"], me["y"]) if me else (mw // 2, mh // 2)
         cam_x, ox, vw_eff = (0, x0 + (vw - mw) // 2, mw) if mw <= vw else (max(0, min(mw - vw, px - vw // 2)), x0, vw)
         cam_y, oy, vh_eff = (0, y0 + (vh - mh) // 2, mh) if mh <= vh else (max(0, min(mh - vh, py - vh // 2)), y0, vh)
-        cave = loc.startswith("mine")
+        cave = loc.startswith(("mine", "deep"))
         night = self.is_night() or cave
         gbg = self.area_ground_bg(loc, night and not cave)
-        th = THEME["summer" if loc == "island" else st["season"]]
+        th = THEME["summer" if loc in ("island", "mystery") else st["season"]]
+        xportals = {tuple(k) for k in st.get("xp") or []}
         tiles = (st.get("areas") or {}).get(loc, {})
         wframe = self.frame % 3
         bcol = {}
-        for b in AR.BUILDINGS[loc]:
+        for b in self.buildings_in(loc):
             for yy in range(b["y"], b["y"] + b["h"]):
                 for xx in range(b["x"], b["x"] + b["w"]):
                     bcol[(xx, yy)] = b
@@ -1142,7 +1589,9 @@ class Client:
                 ch = rows[y][x]
                 hsh = (x * 73856093 ^ y * 19349663) & 0xFFFF
                 d = tiles.get("%d,%d" % (x, y))
-                if d and d.get("o"):
+                if d and d.get("m"):
+                    gl, attr = self.machine_cell(d["m"], gbg)
+                elif d and d.get("o"):
                     gl, attr = self.g(("\u25cf", "o")), (P(ORE_C256.get(d["o"], 250), gbg) if rich else P("white")) | B
                 elif d and d.get("g"):
                     f = W.FORAGE[d["g"]]
@@ -1165,6 +1614,8 @@ class Client:
                     if ch in "CR" and loc == "frontier":
                         c256, b256 = 209, 131
                     attr = (P(c256, b256 if b256 is not None else gbg) if rich else P(c8)) | (B if bold else 0)
+                    if ch == "Z" and d and d.get("x"):
+                        gl, attr = self.g(("\u25a1", "z")), attr & ~B | curses.A_DIM
                 elif ch in TERRAIN_GLYPHS:
                     gl = self.g(TERRAIN_GLYPHS[ch])
                     if ch == "T":
@@ -1180,13 +1631,13 @@ class Client:
                         attr = P(250, gbg) if rich else P("white")
                 else:
                     gl, attr = ch, 0
-                if (x, y) == (fx, fy) and (d or ch in "~!wIEFJLOgVQUDBchbl" or (ch == "@" and (loc, x, y) in W.PORTALS)):
+                if (x, y) == (fx, fy) and (d or ch in "~!wIEFJLOgVQUDBchblZ" or (ch == "@" and ((loc, x, y) in W.PORTALS or (loc, x, y) in xportals))):
                     attr = (attr & ~curses.A_DIM) | curses.A_REVERSE
                 if cave and abs(x - px) + abs(y - py) > 9:
                     attr |= curses.A_DIM
                 self.put(oy + sy, ox + sx, gl, attr)
-        for b in AR.BUILDINGS[loc]:
-            label = b["label"] or (b.get("keeper") and "%s's" % b["keeper"]) or ""
+        for b in self.buildings_in(loc):
+            label = b.get("label") or (b.get("keeper") and "%s's" % b["keeper"]) or ""
             ly = b["y"] + b["h"] // 2 - cam_y
             lx = b["x"] + max(0, (b["w"] - len(label)) // 2) - cam_x
             if label and 0 <= ly < vh_eff:
@@ -1194,6 +1645,7 @@ class Client:
                     if 0 <= lx + i < vw_eff:
                         self.put(oy + ly, ox + lx + i, chh, (P(T256["label_fg"], 236) if rich else P("white")) | B)
         self._indoor_bg = gbg
+        self.draw_entities(loc, cam_x, cam_y, ox, oy, vw_eff, vh_eff, lambda x, y: gbg, self.faced(me))
         for p in sorted(st["players"], key=lambda p: p["name"] == self.name):
             if not p["online"] or p.get("loc", "farm") != loc or not (cam_x <= p["x"] < cam_x + vw_eff and cam_y <= p["y"] < cam_y + vh_eff):
                 continue
@@ -1210,7 +1662,7 @@ class Client:
     def draw_map(self, y0, x0, vh, vw):
         st = self.state
         me = self.my_player()
-        if me and me.get("loc", "farm") in AR.MAPS:
+        if me and self.is_area(me.get("loc", "farm")):
             return self.draw_area(y0, x0, vh, vw, me["loc"])
         if me and me.get("loc", "farm") != "farm":
             return self.draw_interior(y0, x0, vh, vw, me["loc"])
@@ -1245,6 +1697,11 @@ class Client:
                 for i, ch in enumerate(text):
                     if cam_x <= lx + i < cam_x + vw_eff:
                         self.put(oy + ly - cam_y, ox + lx + i - cam_x, ch, lattr)
+        for b in (st.get("xb") or {}).get("farm", []):
+            lx, ly = b["x"] + max(0, (b["w"] - len(b.get("label") or "")) // 2), b["y"] + b["h"] // 2
+            for i, chh in enumerate((b.get("label") or "")[:b["w"]]):
+                if cam_x <= lx + i < cam_x + vw_eff and cam_y <= ly < cam_y + vh_eff:
+                    self.put(oy + ly - cam_y, ox + lx + i - cam_x, chh, (self.pal.pair(T256["label_fg"], 124) if rich else self.pal.pair("white")) | curses.A_BOLD)
         target = self.facing_interactive(me) if me else None
         for (tx, ty), d in self.tiles.items():
             if not (cam_x <= tx < cam_x + vw_eff and cam_y <= ty < cam_y + vh_eff):
@@ -1306,6 +1763,9 @@ class Client:
             if wd["phase"] == "married":
                 banner = " ♥ MARRIED ♥ "
                 self.put(oy + max(0, wd["altar"][0][1] - cam_y - 4), ox + wd["altar"][0][0] - cam_x - len(banner) // 2 + 1, banner, self.pal.pair("magenta") | curses.A_BOLD | curses.A_REVERSE)
+        self.draw_entities("farm", cam_x, cam_y, ox, oy, vw_eff, vh_eff, lambda x, y: self.cell_bg(x, y, None, night), self.faced(me))
+        if hi:
+            self.put(*hi)
         # players (others first so we draw on top)
         players = sorted(st["players"], key=lambda p: p["name"] == self.name)
         for p in players:
@@ -1425,8 +1885,12 @@ class Client:
         p = self.my_player()
         if not p:
             return "", ""
-        if p.get("loc", "farm") in AR.MAPS:
+        if self.is_area(p.get("loc", "farm")):
             return self.describe_area(p)
+        if p.get("loc", "farm") != "farm":
+            who = self.ahead_extra(p["loc"], p["x"] + p["facing"][0], p["y"] + p["facing"][1])
+            if who:
+                return "Inside %s" % W.ROOM_TITLES.get(p["loc"], "the " + p["loc"]), who
         if p.get("loc", "farm") in AR.KEEPERS:
             rows = W.INTERIORS[p["loc"]]
             fx, fy = p["x"] + p["facing"][0], p["y"] + p["facing"][1]
@@ -1434,13 +1898,13 @@ class Client:
             keeper = AR.KEEPERS[p["loc"]]
             what = ("%s - E to talk%s" % (keeper, " and shop" if p["loc"] == "store" else "")) if ch in "nS" else \
                 "The doorway - walk onto it to go out" if ch == "x" else W.INTERIOR_NAMES.get(ch, "wall").capitalize()
-            return "Inside %s's place" % keeper, what
+            return "Inside %s" % W.ROOM_TITLES.get(p["loc"], "the " + p["loc"]), what
         if p.get("loc", "farm") != "farm":
             rows = W.INTERIORS[p["loc"]]
             fx, fy = p["x"] + p["facing"][0], p["y"] + p["facing"][1]
             ch = rows[fy][fx] if 0 <= fy < len(rows) and 0 <= fx < len(rows[0]) else "#"
             hint = {"c": " - E opens the shared chest", "S": " - E to shop", "q": " - E to shop", "k": " - E for the journal", "x": " - walk onto it to go out"}.get(ch, "")
-            return "Inside the %s" % p["loc"], W.INTERIOR_NAMES.get(ch, "wall").capitalize() + hint
+            return "Inside %s" % W.ROOM_TITLES.get(p["loc"], "the " + p["loc"]), W.INTERIOR_NAMES.get(ch, "wall").capitalize() + hint
         x, y = p["x"], p["y"]
         d = self.tiles.get((x, y), {})
         terr = self.map[y][x]
@@ -1480,8 +1944,10 @@ class Client:
         fx, fy = x + p["facing"][0], y + p["facing"][1]
         ft = self.map[fy][fx] if 0 <= fx < W.MAP_W and 0 <= fy < W.MAP_H else "#"
         fd = self.tiles.get((fx, fy), {})
-        ahead = ""
-        if ft == "S":
+        ahead = self.ahead_extra("farm", fx, fy) or ""
+        if ahead:
+            pass
+        elif ft == "S":
             ahead = "Shop - E to browse seeds."
         elif ft == "$":
             ahead = "Shipping bin - E to sell."
@@ -1526,22 +1992,26 @@ class Client:
         return here, ahead
 
     def describe_area(self, p):
-        loc, rows = p["loc"], AR.MAPS[p["loc"]]
+        loc, rows = p["loc"], self.rows_of(p["loc"])
         tiles = (self.state.get("areas") or {}).get(loc, {})
         sel = self.me["inventory"][self.me["selected"]][0] if self.me and self.me["inventory"] else None
         name = lambda c: (AR.TERRAIN_NAMES.get(c) or W.TERRAIN_NAMES.get(c, "")).capitalize()
-        here = "%s - %s" % (AR.AREA_NAMES[loc][0].upper() + AR.AREA_NAMES[loc][1:], name(rows[p["y"]][p["x"]]))
+        title = self.area_title(loc)
+        here = "%s - %s" % (title[0].upper() + title[1:], name(rows[p["y"]][p["x"]]) if 0 <= p["y"] < len(rows) else "")
         fx, fy = p["x"] + p["facing"][0], p["y"] + p["facing"][1]
         ft = rows[fy][fx] if 0 <= fy < len(rows) and 0 <= fx < len(rows[0]) else "#"
         fd, hd = tiles.get("%d,%d" % (fx, fy), {}), tiles.get("%d,%d" % (p["x"], p["y"]), {})
-        portal = (loc, fx, fy) in W.PORTALS
-        if fd.get("g") or hd.get("g"):
+        portal = (loc, fx, fy) in W.PORTALS or [loc, fx, fy] in (self.state.get("xp") or [])
+        extra = self.ahead_extra(loc, fx, fy)
+        if extra:
+            ahead = extra
+        elif fd.get("g") or hd.get("g"):
             ahead = "%s - E to pick." % W.ITEMS[fd.get("g") or hd.get("g")]["name"]
         elif fd.get("o"):
             ahead = ("A rock" if fd["o"] == "stone" else "Rock with " + W.ITEMS[fd["o"]]["name"]) + (" - E to break it." if sel == "pickaxe" else " - hold the pickaxe (5), press E.")
         elif portal and ft == "@":
-            b = next((b for b in AR.BUILDINGS[loc] if tuple(b["door"]) == (fx, fy)), None)
-            ahead = "%s - walk in." % (b["label"].title() if b and b["label"] else "A door")
+            b = next((b for b in self.buildings_in(loc) if tuple(b.get("door") or ()) == (fx, fy)), None)
+            ahead = "%s - walk in." % (b["label"].title() if b and b.get("label") else "A door")
         elif ft in "UD":
             ahead = "Ladder %s - walk onto it." % ("up" if ft == "U" else "down")
         elif portal:
@@ -1550,6 +2020,8 @@ class Client:
             ahead = "Water - E refills the can, F fishes."
         elif ft == "V":
             ahead = "The boat - E to sail."
+        elif ft == "Z":
+            ahead = "A treasure chest - E to open it."
         elif ft == "Q":
             ahead = "The stagecoach - E to ride."
         elif ft == "!":
@@ -1605,7 +2077,7 @@ class Client:
             return "Use on tilled soil: +50%% growth until the crop is harvested."
         if key == "sprinkler":
             return "Place on a tile: keeps the 8 tiles around it watered forever."
-        return "Sells for %dg." % it["sell"]
+        return CR.describe(key) or "Sells for %dg." % it["sell"]
 
     def draw_shop(self, h, w):
         m = self.menu
@@ -1725,7 +2197,7 @@ class Client:
         if inv:
             k = inv[min(m["cursor"], len(inv) - 1)][0]
             self.put(y + bh - 3, x + 2, wrap(self.item_blurb(k), bw - 4)[0], self.pal.pair("cyan"))
-        self.put(y + bh - 2, x + 2, "up/down choose   Enter hold in hand   Esc close", curses.A_DIM)
+        self.put(y + bh - 2, x + 2, "up/down choose   Enter hold in hand   U eat   Esc close", curses.A_DIM)
 
     HELP_TEXT = [
         ("Move", "arrow keys or WASD. You act on the tile you stand on; special things "
@@ -1738,6 +2210,12 @@ class Client:
         ("1-9 / Tab", "choose what you hold. I opens the whole bag."),
         ("T", "chat. Speech bubbles show above your head. / starts a command."),
         ("J", "the farm journal: shared stats, milestones and farmers."),
+        ("U / R / C", "U eats what you hold (or picks a snack), R hops on your horse, C crafts (at a crafting table, or anywhere with a toolbelt)."),
+        ("V", "make a wish when a shooting star crosses the night sky."),
+        ("Villagers", "folks walk to work, the shops and home on the clock. E chats; E again while holding something gives it as a gift. "
+                      "J then F lists your friends."),
+        ("The valley", "walk off the farm's edges to town, the forest, the beach, the mountain and the mine. Festivals fill the "
+                       "town square on set days - talk to Mayor Hazel. Monsters live in the mine: hold a sword or bow and press E."),
         ("shift-Q", "leave. The farm keeps growing while you are away."),
         ("", ""),
         ("Growing", "crops grow in real time, even when nobody is here. Wet soil grows 3x faster "

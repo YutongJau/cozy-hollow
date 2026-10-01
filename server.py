@@ -193,6 +193,7 @@ class FarmServer:
             log("join", name, conn.kind, conn.peer)
             out = self.world.join(name, time.time(), hello.get("sprite"), hello.get("color"), hello.get("hat"))
             conn.send(dict(t="welcome", name=name, farm=self.world.name, log=self.world.log[-40:], build=BUILD,
+                           dyn=[dict(name=k, map=v, title=self.world.place_name(k)) for k, v in self.world.dyn_maps.items()],
                            map=self.world.map, catalog=W.catalog(), web_url=self.web_url))
             self.dispatch(out)
             self.broadcast_state()
@@ -298,6 +299,18 @@ class FarmServer:
             writer.write(body)
 
     # -------------------------------------------------------------- loop
+    async def fast_ticker(self):
+        """Monsters, critters, villagers on the move and balloons get four updates a second."""
+        while not self.stopping:
+            await asyncio.sleep(0.25)
+            try:
+                out = self.world.fast(time.time())
+                self.dispatch(out)
+                if self.world.moved or out:
+                    self.broadcast_state()
+            except Exception:
+                traceback.print_exc()
+
     async def ticker(self):
         while not self.stopping:
             await asyncio.sleep(1.0)
@@ -384,9 +397,11 @@ async def amain(args):
         except (NotImplementedError, RuntimeError):
             pass
     ticker = asyncio.ensure_future(server.ticker())
+    fast = asyncio.ensure_future(server.fast_ticker())
     await stop.wait()
     server.stopping = True
     ticker.cancel()
+    fast.cancel()
     for c in list(server.clients.values()):
         c.send(dict(t="error", text="The farm server is shutting down."))
         c.close()

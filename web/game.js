@@ -57,6 +57,9 @@ const prefs = { name: localStorage.getItem("cozy.name") || "", sprite: localStor
   color: localStorage.getItem("cozy.color") || "pink", hat: localStorage.getItem("cozy.hat") || "cowboy" };
 const cowViz = {};            // cow id -> {x, y, tx, ty, f}
 const fxs = [];               // objects in flight: lifted off a tile into someone's hands, or dropped onto one
+const npcViz = {}, mobViz = {}, critViz = {}, petViz = {}, compViz = {}, chickViz = {};   // things that glide between tiles
+const shots = [], poofs = [], stars = [];
+let hurtAt = 0, baseFarm = null, baseAreas = null, worldSig = "", minigame = null, musicIdx = 0, wishStar = null;
 let lastXp = null, slotSig = null;
 const canvas = $("#map"), ctx = canvas.getContext("2d");
 
@@ -80,6 +83,14 @@ function sfx(kind) {
 }
 function toggleMusic() {
   if (!audio) return;
+  const songs = (me && me.songs) || [];
+  if (music && (music.song || songs.length)) {
+    if (music.timer) { clearInterval(music.timer); music.pad.stop(); }
+    const nxt = music.song ? songs.indexOf(music.song) + 1 : 0;
+    stopSong();
+    if (nxt < songs.length) { music = { song: songs[nxt] }; playSong(songs[nxt]); toast("\u266a " + songs[nxt].replace(/_/g, " ") + " (M for the next song)", "info"); return; }
+    music = null; toast("Music off", "info"); return;
+  }
   if (music) { clearInterval(music.timer); music.pad.stop(); music = null; toast("Music off", "info"); return; }
   const pad = audio.createOscillator(), padG = audio.createGain(), pad2 = audio.createOscillator();
   pad.type = "sine"; pad.frequency.value = 130.8; pad2.type = "sine"; pad2.frequency.value = 196;
@@ -160,12 +171,15 @@ function connect() {
   ws.onerror = () => { if (reconnectTries === 0) toast("Could not reach the farm server.", "warn"); };
 }
 function send(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
+if (location.hash === "#debug") window.cozyDebug = { handle: (m) => handle(m), state: () => state, me: () => me };   // for testing: feed the client a message by hand
 function handle(m) {
   if (m.t === "welcome") {
     if (window.__build && m.build && m.build !== window.__build) { location.reload(); return; }   // the farm was updated: fetch the new game
     window.__build = m.build;
     farmName = m.farm; map = m.map; catalog = m.catalog; buildings = findBuildings(map);
     portals = new Set((catalog.portals || []).map(([l, x, y]) => l + "," + x + "," + y));
+    baseFarm = map.slice(); baseAreas = {}; for (const a in (catalog.areas || {})) baseAreas[a] = catalog.areas[a].slice(); worldSig = "";
+    for (const d of m.dyn || []) { catalog.areas[d.name] = d.map; baseAreas[d.name] = d.map.slice(); catalog.area_names[d.name] = d.title; }
     noChest = new Set((catalog.no_chest || []).map(([x, y]) => x + "," + y));
     logLines = m.log.slice(-6).map((e) => ({ text: stamp(e.ts) + " " + e.text, style: "log", at: Date.now() }));
     $("#login").classList.add("hidden"); $("#game").classList.remove("hidden");
@@ -189,6 +203,15 @@ function handle(m) {
       const v = cowViz[cw.id] || (cowViz[cw.id] = { x: cw.x, y: cw.y, tx: cw.x, ty: cw.y, f: cw.f });
       v.tx = cw.x; v.ty = cw.y; v.f = cw.f;
     }
+    applyWorld(m);
+    const glide = (store, key, e, loc) => { const v = store[key] || (store[key] = { x: e.x, y: e.y, tx: e.x, ty: e.y, loc, dist: 0 }); if (v.loc !== loc) { v.loc = loc; v.x = v.tx = e.x; v.y = v.ty = e.y; } v.tx = e.x; v.ty = e.y; v.seen = now; return v; };
+    for (const n of m.npcs || []) { const v = glide(npcViz, n.n, n, n.loc); v.f = n.f; v.b = n.b; }
+    for (const c of m.chickens || []) { const v = glide(chickViz, c.id, c, "farm"); v.f = c.f; }
+    for (const pt of m.pets || []) { const v = glide(petViz, pt.owner, pt, pt.loc); v.f = pt.f; }
+    for (const pl of m.players) if (pl.companion && pl.online) { const v = glide(compViz, pl.name, pl.companion, pl.companion.loc); v.kind = pl.companion.kind; }
+    for (const loc in m.mobs || {}) for (const mb of m.mobs[loc]) { const v = glide(mobViz, mb.id, mb, loc); v.f = mb.f; }
+    for (const loc in m.critters || {}) for (const c of m.critters[loc]) { const v = glide(critViz, c.id, c, loc); v.f = c.f; }
+    for (const st of [npcViz, chickViz, petViz, compViz, mobViz, critViz]) for (const k in st) if (st[k].seen !== now) delete st[k];
     updateHud();
     if (menu && !(menu.dragging && performance.now() - menu.dragging < 8000)) {   // redraw only when what the window shows changed, never mid-drag
       const sig = menuSig(menu.kind);
@@ -217,7 +240,14 @@ function handle(m) {
     const from = carrierPos(m.who) || { x: m.x, y: m.y };
     fxs.push({ kind: m.kind, who: m.who, item: m.item, x: m.x, y: m.y, from, start: performance.now(), dur: m.kind === "drop" ? 400 : 360, landed: 0 });
     if (fxs.length > 24) fxs.splice(0, fxs.length - 24);
-  } else if (m.t === "open") { if (m.menu === "close") { if (menu && menu.kind === "proposal") closeMenu(); } else openMenu(m.menu, m); }
+  } else if (m.t === "open") { if (m.menu === "close") { if (menu && (menu.kind === "proposal" || menu.kind === "list")) closeMenu(); } else openMenu(m.menu, m); }
+  else if (m.t === "area") { catalog.areas[m.name] = m.map; baseAreas[m.name] = m.map.slice(); catalog.area_names[m.name] = m.title || m.name; delete _areaBld[m.name]; worldSig = ""; }
+  else if (m.t === "star") { stars.push({ id: m.id, x: m.x, y: m.y, dx: m.dx, t0: performance.now() }); if (isOutdoor(curLoc())) { wishStar = { id: m.id, until: performance.now() + 3200 }; $("#wish").classList.remove("hidden"); } }
+  else if (m.t === "shot") { if (m.loc === curLoc()) shots.push({ x0: m.x0, y0: m.y0, x1: m.x1, y1: m.y1, kind: m.kind, t0: performance.now() }); sfx("pop"); }
+  else if (m.t === "poof" || m.t === "pop") { if (m.loc === curLoc()) poofs.push({ x: m.x, y: m.t === "pop" ? m.y - 1.5 : m.y, t0: performance.now(), big: m.kind === "slime_king", pop: m.t === "pop" }); if (m.t === "pop") sfx("coin"); }
+  else if (m.t === "ouch") { hurtAt = performance.now(); sfx("fail"); }
+  else if (m.t === "minigame") startMinigame(m.game, m.seed);
+  else if (m.t === "song") playSong(m.song);
   else if (m.t === "fish_bite") startFishing(m);
   else if (m.t === "error") { if (/another window/.test(m.text)) kicked = true; toast(m.text, "warn"); addLog(m.text, "warn"); }
 }
@@ -248,17 +278,31 @@ function findBuildings(rows) {
   }
   return out;
 }
+function applyWorld(m) {
+  const sig = JSON.stringify([m.edits || {}, m.xb || {}, m.xp || []]);
+  if (sig === worldSig || !baseFarm) return;
+  worldSig = sig;
+  const lay = (rows, ed) => { const g = rows.map((r) => r.split("")); for (const k in ed) { const [x, y] = k.split(",").map(Number); if (g[y] && x < g[y].length) g[y][x] = ed[k]; } return g.map((r) => r.join("")); };
+  map = lay(baseFarm, (m.edits || {}).farm || {});
+  for (const a in baseAreas) catalog.areas[a] = lay(baseAreas[a], (m.edits || {})[a] || {});
+  buildings = findBuildings(map);
+  for (const k in _areaBld) delete _areaBld[k];
+  portals = new Set((catalog.portals || []).concat(m.xp || []).map(([l, x, y]) => l + "," + x + "," + y));
+}
+function extraBuildings(loc) { return ((state && state.xb && state.xb[loc]) || []).map((b) => ({ kind: b.kind, label: b.label, x0: b.x, y0: b.y, x1: b.x + b.w - 1, y1: b.y + b.h - 1 })); }
 function buildingAt(x, y) { for (const b of buildings) if (x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1) return b; return null; }
 function walkable(x, y) {
   const rows = curMap(), loc = curLoc();
   if (y < 0 || y >= rows.length || x < 0 || x >= rows[0].length) return false;
-  if (isArea(loc)) { const t = areaTiles(loc)[x + "," + y]; return AREA_WALK.includes(rows[y][x]) && !(t && t.o); }
+  for (const k in npcViz) { const v = npcViz[k]; if (v.loc === loc && v.tx === x && v.ty === y) return false; }
+  if (isArea(loc)) { const t = areaTiles(loc)[x + "," + y]; return AREA_WALK.includes(rows[y][x]) && !(t && (t.o || t.m)); }
   if (loc !== "farm") { const ch = rows[y][x]; return ch === "." || ch === "r" || ch === "x"; }
-  if (!".:,fGd".includes(rows[y][x])) return false;
+  if (!".:,fGdH".includes(rows[y][x])) return false;
   if (state && state.cows && state.cows.some((cw) => cw.x === x && cw.y === y)) return false;
+  if (state && state.chickens && state.chickens.some((c) => c.x === x && c.y === y)) return false;
   if (chestAt(x, y)) return false;
   const d = tiles[x + "," + y];
-  return !(d && d.t);
+  return !(d && (d.t || d.m));
 }
 
 // ------------------------------------------------------------------ HUD
@@ -352,6 +396,7 @@ function updateHud() {
     }
   }
   if (me) $("#can-top").textContent = "Can " + me.water + "/" + catalog.can + " · Lv" + me.level;
+  if (me) { const bf = $("#buffs"), names = { speed: "\u26a1 Quick feet", luck: "\u2618 Lucky", angler: "\ud83c\udfa3 Steady hands", strength: "\u2694 Strong" }; bf.innerHTML = ""; for (const k in me.buffs || {}) bf.appendChild(el("span", null, names[k] + " " + fmt(me.buffs[k]))); }
   const q = st.quest;
   $("#quest p").textContent = q ? q.who + " needs " + q.n + " " + catalog.items[q.item].name + " for " + q.reason + ". Reward " + q.reward + "g. (you have " + countItem(q.item) + ")" : "Nothing on the board right now.";
   $("#here").textContent = describeHere();
@@ -373,9 +418,10 @@ function describeArea(p) {
   const name = (c) => ((catalog.area_terrain || {})[c] || catalog.terrain_names[c] || "").replace(/^./, (m) => m.toUpperCase());
   const here = catalog.area_names[loc].replace(/^the /, "The ") + " - " + name(rows[p.y][p.x]);
   const fx = p.x + p.facing[0], fy = p.y + p.facing[1], ft = (rows[fy] || "")[fx] || "#", fd = at[fx + "," + fy] || {}, hd = at[p.x + "," + p.y] || {};
-  let ahead = "";
+  let ahead = aheadExtra(loc, fx, fy) || "";
   const portal = portals.has(loc + "," + fx + "," + fy);
-  if (fd.g || hd.g) ahead = catalog.items[fd.g || hd.g].name + " - E to pick.";
+  if (ahead) {}
+  else if (fd.g || hd.g) ahead = catalog.items[fd.g || hd.g].name + " - E to pick.";
   else if (fd.o) ahead = (fd.o === "stone" ? "A rock" : "Rock with " + catalog.items[fd.o].name) + (sel === "pickaxe" ? " - E to break it." : " - hold the pickaxe (5) and press E.");
   else if (portal && ft === "@") { const b = areaBuildings(loc).find((q) => fx >= q.x0 && fx <= q.x1 && fy >= q.y0 && fy <= q.y1); ahead = (b && b.label ? b.label.replace(/\b\w+/g, (w) => w[0] + w.slice(1).toLowerCase()) : "A door") + " - walk in."; }
   else if (ft === "U" || ft === "D") ahead = "Ladder " + (ft === "U" ? "up" : "down") + " - walk onto it.";
@@ -396,13 +442,15 @@ function describeHere() {
   if ((p.loc || "farm") !== "farm") {
     const rows = catalog.interiors[p.loc], fx = p.x + p.facing[0], fy = p.y + p.facing[1], ch = (rows[fy] || "")[fx] || "#";
     const keeper = (catalog.keepers || {})[p.loc];
+    const who = aheadExtra(p.loc, fx, fy), room = (catalog.rooms || {})[p.loc] || "the " + p.loc;
+    if (who && !(keeper && who.startsWith(keeper))) return "Inside " + room + ". Ahead: " + who;
     if (keeper) {
       const what = ch === "n" || ch === "S" ? keeper + " - E to talk" + (p.loc === "store" ? " and shop." : ".") : ch === "x" ? "The door - walk onto it to go outside." : (catalog.interior_names[ch] || "").replace(/^./, (c) => c.toUpperCase());
-      return "Inside: " + keeper + "'s place. Ahead: " + what;
+      return "Inside " + room + ". Ahead: " + what;
     }
     const nm = catalog.interior_names[ch] || "";
     const hint = { c: " - E opens the shared chest.", S: " - E to shop.", q: " - E to shop.", k: " - E for the journal.", x: " - walk onto it to go outside." }[ch] || "";
-    return "Inside the " + p.loc + ". Ahead: " + nm.replace(/^./, (c) => c.toUpperCase()) + hint;
+    return "Inside " + room + ". Ahead: " + nm.replace(/^./, (c) => c.toUpperCase()) + hint;
   }
   const d = tiles[p.x + "," + p.y] || {}, terr = map[p.y][p.x];
   const sel = heldItem(), kind = sel ? catalog.items[sel].kind : null;
@@ -421,8 +469,9 @@ function describeHere() {
   else here = (catalog.terrain_names[terr] || "").replace(/^./, (c) => c.toUpperCase());
   const fx = p.x + p.facing[0], fy = p.y + p.facing[1];
   const ft = (map[fy] || "")[fx] || "#", fd = tiles[fx + "," + fy] || {};
-  let ahead = "";
-  if (ft === "S") ahead = "Shop - E to browse seeds."; else if (ft === "$") ahead = "Shipping bin - E to sell.";
+  let ahead = aheadExtra("farm", fx, fy) || "";
+  if (ahead) {}
+  else if (ft === "S") ahead = "Shop - E to browse seeds."; else if (ft === "$") ahead = "Shipping bin - E to sell.";
   else if (ft === "!") ahead = "Notice board - E to read the request."; else if (ft === "+") ahead = "Farmhouse - E for the farm journal.";
   else if (ft === "~") ahead = "Pond - E refills the can, F goes fishing."; else if (ft === "w") ahead = "Well - E refills the can.";
   else if (ft === "m") ahead = "Mailbox - E to read your letters."; else if (ft === "N") ahead = "Barn - E to open the shared storage.";
@@ -453,10 +502,11 @@ function menuSig(k) {
   if (k === "sell") return JSON.stringify([state.coins, inv]);
   if (k === "board") return JSON.stringify([state.quest, inv]);
   if (k === "bag") return JSON.stringify([inv, me && me.selected]);
+  if (k === "list" || k === "mg") return null;
   if (k === "barn") { const mp = myPlayer(); return JSON.stringify([state.storage, inv, !!(mp && (mp.loc || "farm") === "farm" && chestAt(mp.x + mp.facing[0], mp.y + mp.facing[1]))]); }
   return null;
 }
-function closeMenu() { menu = null; if (mode === "menu") mode = "play"; $("#menu").classList.add("hidden"); canvas.focus(); }
+function closeMenu() { menu = null; if (mode === "menu" || mode === "minigame") mode = "play"; minigame = null; $("#menu").classList.add("hidden"); canvas.focus(); }
 function iconEl(key) { const c = document.createElement("canvas"); c.width = 32; c.height = 32; const g = c.getContext("2d"); g.imageSmoothingEnabled = false; g.drawImage(itemIcon(key, catalog), 0, 0); return c; }
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 function blurb(key) {
@@ -468,6 +518,7 @@ function blurb(key) {
   if (key === "fertilizer") return "Use on tilled soil: +50% growth until the crop is harvested.";
   if (key === "sprinkler") return "Place on a tile: keeps the 8 tiles around it watered forever.";
   if (key === "cow") return "A cow for the pasture by the barn. Gives milk (45g) every 4 hours. Up to " + catalog.max_cows + " cows.";
+  if (it.info) return it.info;
   return "Sells for " + it.sell + "g.";
 }
 function itemRow(key, right, onclick, extra) {
@@ -540,6 +591,7 @@ function renderMenu(fresh) {
     const ms = el("div", "milestones");
     d.all_milestones.forEach((m) => ms.appendChild(el("div", d.milestones.includes(m) ? "got" : "todo", (d.milestones.includes(m) ? "★ " : "☆ ") + m)));
     body.appendChild(ms);
+    const fb = el("button", null, "Friends in the valley"); fb.onclick = () => send({ t: "friends" }); body.appendChild(fb);
   } else if (k === "proposal") {
     h2.textContent = "Father TongTong";
     body.appendChild(el("p", null, "\u201cWell now. Shall I marry you and " + d.partner + "?\u201d"));
@@ -610,6 +662,7 @@ function renderMenu(fresh) {
     if (!inv.length) body.appendChild(el("p", null, "Your bag is empty."));
     inv.forEach(([key, n], i) => {
       const row = itemRow(key, el("span", "price", "x" + n), () => { send({ t: "select", i }); closeMenu(); }, i === me.selected ? "  (in hand)" : "");
+      if (["food", "fruit", "crop", "forage", "artisan"].includes(catalog.items[key].kind)) { const b = el("button", "small", "Eat"); b.onclick = (e) => { e.stopPropagation(); send({ t: "eat", item: key }); }; row.appendChild(b); }
       row.appendChild(el("div", "blurb", blurb(key))); row.style.flexWrap = "wrap"; body.appendChild(row);
     });
     foot.textContent = "Click something to hold it. Esc closes.";
@@ -618,12 +671,22 @@ function renderMenu(fresh) {
     body.innerHTML = "<p><kbd>WASD</kbd> or arrows to walk. You act on the tile you stand on; the pond, shop, bin, board, well, mailbox and trees are used by facing them (they glow).</p>" +
       "<p><kbd>E</kbd> or <kbd>Space</kbd> does the natural thing: till grass, plant the seed in hand, water, harvest, pick forage, refill the can at the pond or well, open the shop / bin / board.</p>" +
       "<p><kbd>F</kbd> fishes when facing the pond: keep the fish inside your net with <kbd>&larr;</kbd> <kbd>&rarr;</kbd> or the mouse.</p>" +
-      "<p><kbd>X</kbd> clears the tile you stand on, or picks up the storage chest you face (carry it and press <kbd>E</kbd> to set it down). <kbd>1</kbd>-<kbd>9</kbd> pick what you hold, <kbd>I</kbd> opens the bag, <kbd>J</kbd> the journal, <kbd>T</kbd> chats, <kbd>M</kbd> music, <kbd>+</kbd>/<kbd>-</kbd> zoom.</p>" +
+      "<p><kbd>X</kbd> clears the tile you stand on, or picks up the storage chest you face (carry it and press <kbd>E</kbd> to set it down). <kbd>1</kbd>-<kbd>9</kbd> pick what you hold, <kbd>I</kbd> opens the bag, <kbd>J</kbd> the journal, <kbd>T</kbd> chats, <kbd>M</kbd> music (and the songs Rowan teaches you), <kbd>+</kbd>/<kbd>-</kbd> zoom.</p>" +
       "<p>Explore the valley: walk off the farm's paths west to <b>Hollow Town</b> (shops, saloon, museum, folks to talk to), north to <b>Summit Ridge</b> and its <b>mine</b> (break ore and gems with the pickaxe, ladders go deeper), south to the <b>Whisperwood</b>. From town go south to <b>Driftwood Beach</b>, where a boat at the pier sails to <b>Palm Isle</b>; the stagecoach in town rides to <b>Dusty Gulch</b>. Fish in rivers, lakes and the sea, and forage what each place grows.</p>" +
+      "<p><b>Folks and festivals.</b> Villagers walk to work, the shops and home on the clock. Face one and press <kbd>E</kbd> to chat; press it again holding something to give it as a gift (everyone has favourites). On festival days the town square fills up: talk to Mayor Hazel for the line dance, the rodeo, the livestock fair, Fallfest, the fishing derby or the winter feast. The <b>Town Hall</b> takes donations for projects that grow the town and bring new neighbours.</p>" +
+      "<p><b>Making things.</b> <kbd>C</kbd> crafts at a crafting table (or anywhere with a toolbelt): machines like the cheese press, preserves jar, bee house and rock tumbler, animal traps, path stones and bridges. Cook at the farmhouse fireplace, and <kbd>U</kbd> eats what you hold for health and a little boost. The tailoring table sews hats.</p>" +
+      "<p><b>Animals.</b> Oakley builds a coop once the town project is done; buy chickens at the seed shop and collect eggs. Adopt a dog or cat at the clinic and buy a horse in Dusty Gulch - <kbd>R</kbd> hops on.</p>" +
+      "<p><b>Adventure.</b> Monsters live in the mine: hold a sword, slingshot, bow or rifle and press <kbd>E</kbd>. A monster treat may tame a weakened one. The ladder at the bottom of the mine leads to the endless Depths. Hunt game in the wild and take it to Hank the butcher. Catch bugs with a net, dig up fossils with the hoe and donate them to the museum. At night, press <kbd>V</kbd> to wish on a shooting star; shoot down balloon presents with a slingshot; a mystery ticket sails the boat to a new island.</p>" +
       "<p>Crops grow in real time even when nobody is here. Wet soil grows 3x faster for 4 hours; rain waters everything; sprinklers keep their 8 neighbours wet. Coins are shared.</p>" +
       "<p>Chat commands: <code>/ping@all [msg]</code> says hi on every terminal of this account, <code>/look boy|girl</code>, <code>/color pink</code>, <code>/farm name</code>, <code>/give player item n</code>, <code>/me action</code>.</p>" +
       "<p>Friends can join from a browser at this address, or the host runs <code>python3 farm.py share</code> to invite other computers.</p>";
   } else if (k === "fish") renderFishing();
+  else if (k === "list") renderList(d, h2, body, foot);
+  else if (k === "mg") {
+    h2.textContent = { dance: "Line Dance", rodeo: "Bull Ride", apples: "Bob for Apples" }[d.game] || "Festival";
+    const box = el("div", "mg"); const cv = document.createElement("canvas"); cv.width = 360; cv.height = 220; box.appendChild(cv); box.appendChild(el("div", "mgs", ""));
+    body.appendChild(box); mgKick(); foot.textContent = d.game === "dance" ? "Arrow keys (or WASD) when each arrow reaches the line. Esc stops." : d.game === "rodeo" ? "\u2190 \u2192 to lean against the bull. Esc jumps off." : "Space or E to bob. Esc gives up.";
+  }
   body.scrollTop = keep; const bank = body.querySelector(".rs-bank"); if (bank) bank.scrollTop = keepBank;
   menu.sig = state ? menuSig(k) : null;
 }
@@ -684,6 +747,8 @@ window.addEventListener("keydown", (e) => {
     if (DIRS[e.key]) { held.add(DIRS[e.key]); e.preventDefault(); }
     return;
   }
+  if (mode === "minigame") { mgKey(e); return; }
+  if (mode === "menu" && menu && menu.kind === "list" && e.key !== "Escape") { listKeys(e); return; }
   if (mode === "menu") {
     if (e.key === "Escape" || e.key === "i" || e.key === "I" || (menu && menu.kind === "help" && (e.key === "?" || e.key === "h" || e.key === "H")) || (menu && menu.kind === "journal" && (e.key === "j" || e.key === "J"))) { if (menu && menu.kind === "proposal") send({ t: "propose_answer", yes: false }); closeMenu(); }
     if (menu && menu.kind === "shop") {
@@ -703,6 +768,10 @@ window.addEventListener("keydown", (e) => {
     send({ t: "interact" }); e.preventDefault();
   }
   else if (e.key === "f" || e.key === "F") send({ t: "fish_start" });
+  else if (e.key === "u" || e.key === "U") send({ t: "eat" });
+  else if (e.key === "r" || e.key === "R") send({ t: "ride" });
+  else if (e.key === "c" || e.key === "C") send({ t: "craft_open" });
+  else if (e.key === "v" || e.key === "V") wish();
   else if (e.key === "x" || e.key === "X") send({ t: "clear" });
   else if (/^[1-9]$/.test(e.key)) send({ t: "select", i: parseInt(e.key, 10) - 1 });
   else if (e.key === "Tab") { if (me && me.inventory.length) send({ t: "select", i: (me.selected + 1) % me.inventory.length }); e.preventDefault(); }
@@ -749,7 +818,8 @@ function updateSelf(dt, now) {
   if (!my.ready) return;
   if (state && state.wedding) { my.stepping = false; return; }
   if (my.stepping) {
-    const sp = WALK_SPEED * dt, dx = my.tx - my.x, dy = my.ty - my.y, dist = Math.hypot(dx, dy);
+    const mp = myPlayer(), boost = (mp && mp.riding ? 1.8 : 1) * (me && me.buffs && me.buffs.speed > 0 ? 1.3 : 1);
+    const sp = WALK_SPEED * boost * dt, dx = my.tx - my.x, dy = my.ty - my.y, dist = Math.hypot(dx, dy);
     if (dist <= sp) { my.x = my.tx; my.y = my.ty; my.stepping = false; my.dist += dist; }
     else { my.x += dx / dist * sp; my.y += dy / dist * sp; my.dist += sp; }
   }
@@ -824,6 +894,9 @@ function renderFrame(now) {
     else { v.x += dx / dist * sp; v.y += dy / dist * sp; v.dist += sp; }
     v.moving = dist > 0.001;
   }
+  glideAll(npcViz, 2.2, dt); glideAll(chickViz, 2.6, dt); glideAll(petViz, WALK_SPEED * 1.1, dt); glideAll(compViz, WALK_SPEED * 1.1, dt);
+  glideAll(mobViz, 4.5, dt); glideAll(critViz, 5, dt);
+  updateHudLive(now);
   const loc = curLoc();
   if (!isOutdoor(loc)) { renderInterior(now, dt); return; }
   const M = curMap(), farm = loc === "farm", ATL = areaTiles(loc), cave = /^mine/.test(loc), base = AREA_BASE[loc];
@@ -950,8 +1023,36 @@ function renderFrame(now) {
       if (ad && ad.o) ents.push({ y: y + 0.3, draw: () => ctx.drawImage(Art.oreSprite(ad.o, cave, h), sx, sy, T, T) });
     }
   }
+  // 2b. life in the valley: machines, chests, bugs, dig spots, villagers, animals, monsters, game, festivals
+  const inView = (x, y) => x >= x0 - 2 && x <= x1 + 2 && y >= y0 - 3 && y <= y1 + 3;
+  const tl = farm ? tiles : ATL;
+  for (const k in tl) {
+    const d = tl[k]; if (!d.m) continue;
+    const [tx, ty] = k.split(",").map(Number); if (!inView(tx, ty)) continue;
+    const sx = ox + tx * T, sy = oy + ty * T;
+    ents.push({ y: ty + 0.45, draw: () => { ctx.fillStyle = "rgba(0,0,0,.16)"; ctx.fillRect(sx + 4 * SCALE, sy + T - 4 * SCALE, T - 8 * SCALE, 3 * SCALE); ctx.drawImage(Art.machineSprite(d.m[0], d.m[1] === 1), sx, sy - 2 * SCALE, T, T); if (d.m[1] === 2 && d.m[2]) readyBubble(sx, sy - 4 * SCALE, d.m[2], now); } });
+  }
+  if (/^deep/.test(loc)) for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (M[y][x] === "Z") { const sx = ox + x * T, sy = oy + y * T, opened = !!(ATL[x + "," + y] && ATL[x + "," + y].x); ents.push({ y: y + 0.4, draw: () => ctx.drawImage(Art.treasureSprite(opened), sx, sy, T, T) }); }
+  const bl = (state.bugs || {})[loc] || {};
+  for (const k in bl) { const [bx, by] = k.split(",").map(Number); if (inView(bx, by)) ents.push({ y: by + 0.7, draw: () => drawBug(bl[k], ox + bx * T, oy + by * T, now, night) }); }
+  for (const k of ((state.digs || {})[loc] || [])) { const [gx, gy] = k.split(",").map(Number); if (inView(gx, gy)) ctx.drawImage(Art.digSprite(Math.floor(now / 250 + gx) % 3), ox + gx * T, oy + gy * T, T, T); }
+  for (const name in npcViz) { const v = npcViz[name]; if (v.loc === loc && inView(v.x, v.y)) ents.push({ y: v.y + 0.9, draw: () => drawNpc(name, v, ox, oy, now) }); }
+  if (farm) for (const c of state.chickens || []) {
+    const v = chickViz[c.id]; if (!v || !inView(v.x, v.y)) continue;
+    const fr = v.moving ? 1 : (Math.floor(now / 700 + c.id) % 6 === 0 ? 2 : 0);
+    ents.push({ y: v.y + 0.8, draw: () => { drawSide(Art.chickenSprite(c.c, fr), v.x, v.y, c.f, ox, oy, T, -3); if (c.egg) readyBubble(ox + v.x * T, oy + v.y * T - 8 * SCALE, "egg", now); } });
+  }
+  for (const pt of state.pets || []) { const v = petViz[pt.owner]; if (v && v.loc === loc && inView(v.x, v.y)) ents.push({ y: v.y + 0.85, draw: () => drawPet(pt, v, ox, oy, now) }); }
+  for (const owner in compViz) { const v = compViz[owner]; if (v.loc === loc && inView(v.x, v.y)) ents.push({ y: v.y + 0.85, draw: () => drawMob(v.kind, v, ox, oy, now, 1, true, 0) }); }
+  for (const mb of (state.mobs || {})[loc] || []) { const v = mobViz[mb.id]; if (v && inView(v.x, v.y)) ents.push({ y: v.y + 0.9, draw: () => drawMob(mb.k, v, ox, oy, now, mb.hp, false, mb.h) }); }
+  for (const c of (state.critters || {})[loc] || []) {
+    const v = critViz[c.id]; if (!v || !inView(v.x, v.y)) continue;
+    const big = c.k === "deer";
+    ents.push({ y: v.y + 0.85, draw: () => drawSide(Art.critterSprite(c.k, v.moving ? Math.floor(now / 140) % 2 : 0), v.x, v.y, c.f, ox, oy, big ? 48 * SCALE : T, big ? -18 : -2, big ? -8 : 0) });
+  }
+  if (loc === "town" && state.festival) festivalDecor(state.festival, ents, ox, oy, now);
   // 3. buildings: shadows, the farmhouse porch and smoke, then the sprites as depth-sorted entities
-  const blds = farm ? buildings : areaBuildings(loc);
+  const blds = farm ? buildings.concat(extraBuildings("farm")) : areaBuildings(loc);
   for (const b of blds) {
     if (b.x1 < x0 - 2 || b.x0 > x1 + 2 || b.y1 < y0 - 3 || b.y0 > y1 + 1) continue;
     if (b.kind !== "mine" && b.kind !== "volcano") {
@@ -965,7 +1066,7 @@ function renderFrame(now) {
       smokeAcc += dt; if (smokeAcc > 0.45) { smokeAcc = 0; smoke.push({ x: b.x1 - 2.2, y: b.y0 - 0.55, a: 0.55, r: 2.5, vx: 0.15 + Math.random() * 0.2 }); }
     }
     const w = b.x1 - b.x0 + 1, hh = b.y1 - b.y0 + 1;
-    const spr = farm ? Art.buildingSprite(b.kind, w, hh, night > 0.2) : Art.areaBuilding(b.kind, w, hh, night > 0.2, b.label, season);
+    const spr = farm && "WSN".includes(b.kind) ? Art.buildingSprite(b.kind, w, hh, night > 0.2) : Art.areaBuilding(b.kind, w, hh, night > 0.2, b.label, season);
     ents.push({ y: b.y1 + 0.6, draw: () => ctx.drawImage(spr, ox + b.x0 * T - Art.OV * SCALE, oy + b.y0 * T - Art.TOPPAD * SCALE, w * T + 2 * Art.OV * SCALE, hh * T + Art.TOPPAD * SCALE) });
   }
   for (const sm of smoke) { sm.y -= 0.35 * dt; sm.x += sm.vx * dt; sm.a -= 0.1 * dt; sm.r += 1.4 * dt; }
@@ -1044,6 +1145,7 @@ function renderFrame(now) {
     } else e.draw();
   });
   drawFx(now, ox, oy);
+  drawFlying(loc, ox, oy, now);
   // 6. ambient life
   if (!cave && night < 0.1 && hourNow() > 7 && hourNow() < 18.5 && weather === "sun" && season !== "winter") {
     while (butterflies.length < 5) butterflies.push({ x: Math.random() * mapW, y: Math.random() * mapH, p: Math.random() * 6.3, c: ["#fff8d0", "#ffd0e8", "#d8f0ff"][butterflies.length % 3] });
@@ -1115,7 +1217,7 @@ function renderFrame(now) {
       }
     }
     for (const b of blds) {
-      if (farm) {
+      if (farm && "WSN".includes(b.kind)) {
         const rr = Art.roofRowsFor(b.y1 - b.y0 + 1), wy = b.y0 + rr;
         const cols = b.kind === "W" ? [1, 3, 7, 9] : (b.kind === "S" ? [2, 3, 7, 8] : [4]);
         for (const cx of cols) {
@@ -1163,12 +1265,14 @@ function renderFrame(now) {
     if (p.bubble) drawSpeech(px_, py_ - 3 * SCALE, p.bubble, shirt);
     else if (p.name !== prefs.name) drawTag(px_, py_ - 2 * SCALE, p.name);
   }
+  if (cave || loc === "farm" || isArea(loc)) drawStars(cw, ch, now);
+  if (now - hurtAt < 350) { ctx.fillStyle = "rgba(220,40,40," + (0.28 * (1 - (now - hurtAt) / 350)).toFixed(3) + ")"; ctx.fillRect(0, 0, cw, ch); }
   drawBanner(now, cw);
   if (Math.floor(now / 1000) !== Math.floor((now - dt * 1000) / 1000)) $("#clock").textContent = skyLabel(hourNow());
 }
 const _areaBld = {};
 function areaBuildings(loc) {
-  if (!_areaBld[loc]) _areaBld[loc] = ((catalog.buildings || {})[loc] || []).map((b) => ({ kind: b.kind, label: b.label, x0: b.x, y0: b.y, x1: b.x + b.w - 1, y1: b.y + b.h - 1 }));
+  if (!_areaBld[loc]) _areaBld[loc] = ((catalog.buildings || {})[loc] || []).map((b) => ({ kind: b.kind, label: b.label, x0: b.x, y0: b.y, x1: b.x + b.w - 1, y1: b.y + b.h - 1 })).concat(extraBuildings(loc));
   return _areaBld[loc];
 }
 function drawBanner(now, cw) {
@@ -1225,14 +1329,17 @@ function renderInterior(now, dt) {
     if ("btcfFkpSqhox".includes(c)) { const spr = Art.interiorObj(c, fr, hash(x + 3, y + 5) % 6); if (spr) ents.push({ y: y + (c === "x" || c === "r" ? 0 : 0.5), draw: () => ctx.drawImage(spr, ox + x * T, oy + y * T, T, T) }); }
     else if ("dai".includes(c)) { const spr = Art.interiorExtra(c, hash(x, y)); ents.push({ y: y + 0.5, draw: () => ctx.drawImage(spr, ox + x * T, oy + y * T, T, T) }); }
     else if (c === "n") {
-      // the person who works here, standing behind their own stretch of counter when there is one
-      const who = (catalog.keepers || {})[loc], look = (catalog.npcs || {})[who] || ["boy", "white", "none"], counter = rows[y][x - 1] === "S" || rows[y][x + 1] === "S";
-      ents.push({ y: y + 0.5, draw: () => {
-        const sx = ox + x * T, sy = oy + y * T, bob = Math.floor(now / 900 + x) % 2;
-        ctx.drawImage(charSprite(look[0], "down", 0, COLORS[look[1]], look[2]), sx, sy - (16 + bob) * SCALE, T, 48 * SCALE);
-        if (counter) { const cs = Art.interiorObj("S", fr, hash(x + 3, y + 5) % 6); if (cs) ctx.drawImage(cs, sx, sy, T, T); }
-      } });
+      // the keeper's own stretch of counter; the keeper stands here when they are in (see npcViz below)
+      const counter = rows[y][x - 1] === "S" || rows[y][x + 1] === "S";
+      if (counter) { const cs = Art.interiorObj("S", fr, hash(x + 3, y + 5) % 6); if (cs) ents.push({ y: y + 0.95, draw: () => ctx.drawImage(cs, ox + x * T, oy + y * T, T, T) }); }
     }
+  }
+  for (const name in npcViz) { const v = npcViz[name]; if (v.loc === loc) ents.push({ y: v.y + 0.5, draw: () => drawNpc(name, v, ox, oy, now) }); }
+  for (const pt of state.pets || []) { const v = petViz[pt.owner]; if (v && v.loc === loc) ents.push({ y: v.y + 0.85, draw: () => drawPet(pt, v, ox, oy, now) }); }
+  for (const owner in compViz) { const v = compViz[owner]; if (v.loc === loc) ents.push({ y: v.y + 0.85, draw: () => drawMob(v.kind, v, ox, oy, now, 1, true, 0) }); }
+  if (loc === "museum") {      // donated pieces sit in the display cases
+    const cases = []; for (let yy = 0; yy < mapH; yy++) for (let xx = 0; xx < mapW; xx++) if (rows[yy][xx] === "d") cases.push([xx, yy]);
+    (state.museum || []).slice(0, cases.length).forEach((key, i) => { const [cx, cy] = cases[i]; ents.push({ y: cy + 0.6, draw: () => ctx.drawImage(itemIcon(key, catalog), ox + cx * T + 8 * SCALE, oy + cy * T + 5 * SCALE, 16 * SCALE, 16 * SCALE) }); });
   }
   for (const p of state.players) {
     if (!p.online || (p.loc || "farm") !== loc) continue;
@@ -1257,16 +1364,19 @@ function drawFarmer(p, x, y, facing, frame, ox, oy, now, held) {
   const shirt = COLORS[catalog.player_colors[p.color % catalog.player_colors.length]] || "#3fc1e6";
   const sw0 = swings[p.name], carrying = p.carry === "chest";
   const dropping = fxBusy("drop", p.name, now);   // arms stay up while what they just let go is still falling
-  const c = charSprite(p.sprite || "boy", facing, frame, shirt, p.hat, carrying || dropping || (plantable(held) && !sw0));
-  const sx = Math.round(ox + x * T), sy = Math.round(oy + y * T);
-  ctx.fillStyle = "rgba(0,0,0,.22)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, sy + T - 2 * SCALE, 11 * SCALE, 4 * SCALE, 0, 0, 6.3); ctx.fill();
+  const customHat = p.hat && p.hat !== "cowboy" && p.hat !== "none" && Art.hatSprite && Art.hatSprite(p.hat, facing) ? p.hat : null;
+  const c = charSprite(p.sprite || "boy", facing, frame, shirt, customHat ? "none" : p.hat, carrying || dropping || (plantable(held) && !sw0));
+  const riding = !!(p.riding && p.horse), sx = Math.round(ox + x * T), sy0 = Math.round(oy + y * T), sy = sy0 - (riding ? 13 * SCALE : 0);
+  ctx.fillStyle = "rgba(0,0,0,.22)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, sy0 + T - 2 * SCALE, (riding ? 18 : 11) * SCALE, 4 * SCALE, 0, 0, 6.3); ctx.fill();
+  if (riding) ctx.drawImage(Art.horseSprite(p.horse, facing, frame ? Math.floor(now / 110) % 4 : 0), sx - 8 * SCALE, sy0 - 18 * SCALE, 48 * SCALE, 48 * SCALE);
   const sw = swings[p.name];
   const swinging = sw && now - sw.start < 380;
   if (sw && !swinging) delete swings[p.name];
   const showHeld = held && !swinging && !p.fishing && !carrying && !dropping;
   const overhead = carrying || (showHeld && plantable(held));
   if (facing === "up" && !overhead) { if (swinging) drawTool(sw, sx, sy, facing, now); else if (showHeld) drawHeld(held, sx, sy, facing, frame); }
-  ctx.drawImage(c, sx, sy - 16 * SCALE, T, 48 * SCALE);
+  if (riding) ctx.drawImage(c, 0, 0, 32, 33, sx, sy - 16 * SCALE, T, 33 * SCALE); else ctx.drawImage(c, sx, sy - 16 * SCALE, T, 48 * SCALE);
+  if (customHat) { const bob = frame % 8 === 0 ? 0 : Math.round(Math.abs(Math.sin((frame % 8) / 8 * Math.PI * 2)) * 2); ctx.drawImage(Art.hatSprite(customHat, facing), sx, sy - (16 + bob) * SCALE, T, 16 * SCALE); }
   if (carrying) { if (!fxBusy("lift", p.name, now, "chest") && !dropping) drawCarry(sx, sy, frame); }   // the fx sprite has the chest until it lands
   else if (facing !== "up" || overhead) { if (swinging) drawTool(sw, sx, sy, facing, now); else if (showHeld) drawHeld(held, sx, sy, facing, frame); }
   if (p.fishing) {
@@ -1360,6 +1470,331 @@ function drawTool(sw, sx, sy, facing, now) {
   ctx.drawImage(icon, -4 * SCALE, -22 * SCALE, 26 * SCALE, 26 * SCALE);
   ctx.restore();
 }
+// ------------------------------------------------------------------ life in the valley: drawing helpers
+function glideAll(store, speed, dt) {
+  for (const k in store) {
+    const v = store[k], dx = v.tx - v.x, dy = v.ty - v.y, d = Math.hypot(dx, dy), sp = speed * dt;
+    if (d > 3) { v.x = v.tx; v.y = v.ty; } else if (d <= sp) { v.x = v.tx; v.y = v.ty; v.dist += d; } else { v.x += dx / d * sp; v.y += dy / d * sp; v.dist += sp; }
+    v.moving = d > 0.01;
+  }
+}
+function readyBubble(sx, sy, key, now) {
+  /* a little thought bubble with the finished thing in it, bobbing over a machine or a hen */
+  const b = Math.round(Math.sin(now / 280) * 2) * SCALE, x = sx + T / 2, y = sy - 10 * SCALE + b, r = 9 * SCALE;
+  ctx.fillStyle = "#2b1f17"; ctx.beginPath(); ctx.arc(x, y, r + SCALE, 0, 6.3); ctx.fill();
+  ctx.fillStyle = "#fffaf0"; ctx.beginPath(); ctx.arc(x, y, r, 0, 6.3); ctx.fill();
+  ctx.fillRect(x - 2 * SCALE, y + r - SCALE, 4 * SCALE, 3 * SCALE);
+  ctx.drawImage(itemIcon(key, catalog), x - 7 * SCALE, y - 7 * SCALE, 14 * SCALE, 14 * SCALE);
+}
+function drawBug(kind, sx, sy, now, night) {
+  const t = now / 1000 + sx * 0.013, hx = sx + T / 2 + Math.sin(t * 2.1) * 7 * SCALE, hy = sy + T / 2 - 5 * SCALE + Math.cos(t * 3.3) * 4 * SCALE;
+  if (kind === "firefly" || (night > 0.3 && /moth|beetle/.test(kind))) {
+    const g = ctx.createRadialGradient(hx, hy, 0, hx, hy, 10 * SCALE); g.addColorStop(0, "rgba(230,255,150,.55)"); g.addColorStop(1, "rgba(230,255,150,0)");
+    ctx.fillStyle = g; ctx.fillRect(hx - 10 * SCALE, hy - 10 * SCALE, 20 * SCALE, 20 * SCALE);
+  }
+  const flap = Math.sin(now / 70 + sx) > 0 ? 12 : 10;
+  ctx.drawImage(itemIcon(kind, catalog), hx - flap / 2 * SCALE, hy - 6 * SCALE, flap * SCALE, 12 * SCALE);
+}
+function drawSide(spr, x, y, f, ox, oy, size, yoff, xoff) {
+  /* a side-on sprite (chicken, game) facing f: 1 right, -1 left; with a soft shadow under its feet */
+  const sx = Math.round(ox + x * T + (xoff || 0) * SCALE), sy = Math.round(oy + y * T + (yoff || 0) * SCALE);
+  ctx.fillStyle = "rgba(0,0,0,.18)"; ctx.beginPath(); ctx.ellipse(ox + x * T + T / 2, oy + y * T + T - 3 * SCALE, 10 * SCALE, 3 * SCALE, 0, 0, 6.3); ctx.fill();
+  if (f < 0) { ctx.save(); ctx.translate(sx + size, sy); ctx.scale(-1, 1); ctx.drawImage(spr, 0, 0, size, size); ctx.restore(); }
+  else ctx.drawImage(spr, sx, sy, size, size);
+}
+function drawPet(pt, v, ox, oy, now) {
+  const f = pt.f || [0, 1], facing = facingName(f), fr = v.moving ? 1 + Math.floor(now / 120) % 3 : 0;
+  const sx = Math.round(ox + v.x * T), sy = Math.round(oy + v.y * T);
+  ctx.fillStyle = "rgba(0,0,0,.18)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, sy + T - 3 * SCALE, 10 * SCALE, 3 * SCALE, 0, 0, 6.3); ctx.fill();
+  ctx.drawImage(Art.petSprite(pt.kind, facing, fr), sx, sy - 4 * SCALE, T, T);
+}
+function drawMob(kind, v, ox, oy, now, hp, tame, hurt) {
+  const big = kind === "slime_king", size = big ? 48 * SCALE : T, flying = kind === "bat" || kind === "ghost";
+  const sx = Math.round(ox + v.x * T - (big ? 8 * SCALE : 0)), hover = flying ? Math.round(Math.sin(now / 180 + v.x) * 2 - 6) * SCALE : 0;
+  const sy = Math.round(oy + v.y * T - (big ? 16 * SCALE : 0)) + hover;
+  ctx.fillStyle = "rgba(0,0,0,.22)"; ctx.beginPath(); ctx.ellipse(ox + v.x * T + T / 2, oy + v.y * T + T - 3 * SCALE, (big ? 20 : 10) * SCALE, (big ? 5 : 3) * SCALE, 0, 0, 6.3); ctx.fill();
+  const spr = Art.monsterSprite(kind, Math.floor(now / (flying ? 120 : 380) + v.x) % 2);
+  if (tame) { ctx.save(); ctx.globalAlpha = 0.95; }
+  if ((v.f || 1) < 0 && !big) { ctx.save(); ctx.translate(sx + size, sy); ctx.scale(-1, 1); ctx.drawImage(spr, 0, 0, size, size); ctx.restore(); } else ctx.drawImage(spr, sx, sy, size, size);
+  if (hurt) { ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = 0.5; ctx.drawImage(spr, sx, sy, size, size); ctx.restore(); }
+  if (tame) { ctx.restore(); ctx.fillStyle = "#ff7eb6"; ctx.fillRect(sx + T / 2 - 2 * SCALE, sy - 2 * SCALE, 4 * SCALE, 3 * SCALE); }
+  if (hp < 1 && !tame) {
+    const w = (big ? 40 : 22) * SCALE, x = ox + v.x * T + T / 2 - w / 2, y = sy - 4 * SCALE;
+    ctx.fillStyle = "#2b1f17"; ctx.fillRect(x - SCALE, y - SCALE, w + 2 * SCALE, 4 * SCALE);
+    ctx.fillStyle = "#e0402f"; ctx.fillRect(x, y, Math.max(0, w * hp), 2 * SCALE);
+  }
+}
+function drawNpc(name, v, ox, oy, now) {
+  const look = (catalog.npcs || {})[name] || ["boy", "white", "none"], f = v.f || [0, 1];
+  const ci = Math.max(0, (catalog.player_colors || []).indexOf(look[1]));
+  drawFarmer({ name, color: ci, sprite: look[0], hat: look[2], facing: f }, v.x, v.y, facingName(f), v.moving ? 1 + Math.floor(v.dist * 4) % 7 : 0, ox, oy, now, null);
+  const px_ = ox + v.x * T + T / 2, py_ = oy + v.y * T - 18 * SCALE;
+  if (v.b) drawBubble(px_, py_ - 2 * SCALE, v.b);
+  else if (my.ready && Math.abs(my.x - v.x) + Math.abs(my.y - v.y) < 3.5) drawTag(px_, py_, name);
+}
+function festivalDecor(kind, ents, ox, oy, now) {
+  /* the square dressed for the day: bunting between the corner lamps, a banner over the fountain, seasonal props */
+  const flagCols = { hoedown: ["#ff7eb6", "#ffe066", "#7fd8e8"], rodeo: ["#d9463c", "#f4f1ea", "#3a7bd5"], fair: ["#6cc24a", "#ffe066", "#f28c28"],
+    fallfest: ["#f28c28", "#a8463a", "#ffe066"], derby: ["#7fd8e8", "#f4f1ea", "#3a7bd5"], feast: ["#d9463c", "#3fa66a", "#ffe066"] }[kind];
+  const lines = [[[27, 14], [45, 14]], [[27, 30], [45, 30]], [[27, 14], [27, 30]], [[45, 14], [45, 30]], [[30, 18], [42, 18]]];
+  for (const [[ax, ay], [bx, by]] of lines) {
+    const p0 = { x: ox + ax * T + T / 2, y: oy + ay * T - 6 * SCALE }, p1 = { x: ox + bx * T + T / 2, y: oy + by * T - 6 * SCALE };
+    const n = Math.max(4, Math.round(Math.hypot(p1.x - p0.x, p1.y - p0.y) / (0.8 * T))), sag = ax === bx ? 0 : 16 * SCALE;
+    ents.push({ y: Math.min(ay, by) - 0.2, draw: () => {
+      ctx.strokeStyle = "rgba(60,40,20,.9)"; ctx.lineWidth = SCALE; ctx.beginPath(); ctx.moveTo(p0.x, p0.y);
+      ctx.quadraticCurveTo((p0.x + p1.x) / 2, (p0.y + p1.y) / 2 + sag, p1.x, p1.y); ctx.stroke();
+      for (let i = 1; i < n; i++) {
+        const u = i / n, x = (1 - u) * (1 - u) * p0.x + 2 * (1 - u) * u * (p0.x + p1.x) / 2 + u * u * p1.x, y = (1 - u) * (1 - u) * p0.y + 2 * (1 - u) * u * ((p0.y + p1.y) / 2 + sag) + u * u * p1.y;
+        const sway = Math.sin(now / 400 + i) * SCALE;
+        ctx.fillStyle = flagCols[i % 3]; ctx.beginPath(); ctx.moveTo(x - 4 * SCALE, y); ctx.lineTo(x + 4 * SCALE, y); ctx.lineTo(x + sway, y + 8 * SCALE); ctx.closePath(); ctx.fill();
+      }
+    } });
+  }
+  const title = { hoedown: "SPRING HOEDOWN", rodeo: "RODEO ROUNDUP", fair: "LIVESTOCK FAIR", fallfest: "FALLFEST", derby: "FROST FISHING DERBY", feast: "WINTER FEAST" }[kind];
+  const bx = ox + 36.5 * T, by = oy + 15.2 * T;
+  ents.push({ y: 15.6, draw: () => {
+    const tw = Art.textWidth(title, 2) * SCALE, w = tw + 16 * SCALE, h = 16 * SCALE;
+    ctx.fillStyle = "#5a3a22"; ctx.fillRect(bx - w / 2 - 2 * SCALE, by - h, 3 * SCALE, h * 2.2); ctx.fillRect(bx + w / 2 - SCALE, by - h, 3 * SCALE, h * 2.2);
+    ctx.fillStyle = "#2b1f17"; ctx.fillRect(bx - w / 2 - SCALE, by - h - SCALE, w + 2 * SCALE, h + 2 * SCALE);
+    ctx.fillStyle = flagCols[0]; ctx.fillRect(bx - w / 2, by - h, w, h);
+    const c = blank(Art.textWidth(title, 2) + 2, 12); Art.text3x5(c.getContext("2d"), 1, 1, title, "#2b1f17", 2);
+    ctx.drawImage(c, bx - tw / 2, by - h + 3 * SCALE, tw + 2 * SCALE, 12 * SCALE);
+  } });
+  const props = { fallfest: ["pumpkin", "h", "pumpkin", "h"], fair: ["h", "h", "B", "h"], rodeo: ["h", "B", "h", "c"], hoedown: ["f", "B", "f", "h"], derby: ["B", "c", "B", "c"], feast: ["c", "B", "c", "B"] }[kind];
+  [[29, 20], [43, 20], [29, 24], [43, 24]].forEach(([x, y], i) => {
+    const what = props[i], sx = ox + x * T, sy = oy + y * T;
+    ents.push({ y: y + 0.4, draw: () => { if (what === "pumpkin") ctx.drawImage(Art.cropSprite("pumpkin", 3, 1), sx, sy, T, T); else ctx.drawImage(Art.propSprite(what), sx, sy, T, T); } });
+  });
+}
+function drawFlying(loc, ox, oy, now) {
+  // a present floating by on a balloon
+  const b = state.balloon;
+  if (b && b.loc === loc) {
+    const sx = ox + b.x * T, sy = oy + (b.y - 3) * T;
+    ctx.fillStyle = "rgba(0,0,0,.12)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, oy + b.y * T + T - 2 * SCALE, 9 * SCALE, 3 * SCALE, 0, 0, 6.3); ctx.fill();
+    ctx.drawImage(Art.balloonSprite(Math.floor(now / 300) % 2), sx, sy, T, 64 * SCALE);
+  }
+  // arrows, bullets and stones in flight
+  for (let i = shots.length - 1; i >= 0; i--) {
+    const sh = shots[i], u = (now - sh.t0) / 220;
+    if (u >= 1) { shots.splice(i, 1); continue; }
+    const x = ox + (sh.x0 + (sh.x1 - sh.x0) * u) * T + T / 2, y = oy + (sh.y0 + (sh.y1 - sh.y0) * u) * T + T / 2 - 6 * SCALE;
+    ctx.fillStyle = sh.kind === "arrow" ? "#a5713f" : sh.kind === "bullet" ? "#fff2a8" : "#9a9aa4";
+    if (sh.kind === "arrow") ctx.fillRect(x - (sh.x1 !== sh.x0 ? 6 : 1) * SCALE, y - (sh.y1 !== sh.y0 ? 6 : 1) * SCALE, (sh.x1 !== sh.x0 ? 12 : 2) * SCALE, (sh.y1 !== sh.y0 ? 12 : 2) * SCALE);
+    else { ctx.beginPath(); ctx.arc(x, y, 2 * SCALE, 0, 6.3); ctx.fill(); }
+  }
+  // puffs where something vanished (and confetti where a balloon popped)
+  for (let i = poofs.length - 1; i >= 0; i--) {
+    const pf = poofs[i], u = (now - pf.t0) / 500;
+    if (u >= 1) { poofs.splice(i, 1); continue; }
+    const cx = ox + pf.x * T + T / 2, cy = oy + pf.y * T + T / 2;
+    for (let k = 0; k < (pf.pop ? 12 : 7); k++) {
+      const a = k * 0.9, r = (4 + u * (pf.big ? 30 : 16)) * SCALE;
+      ctx.fillStyle = pf.pop ? ["#e0403f", "#ffe066", "#3a7bd5", "#6cc24a"][k % 4] : "rgba(240,236,228," + (0.8 * (1 - u)).toFixed(2) + ")";
+      ctx.beginPath(); ctx.arc(cx + Math.cos(a) * r, cy + Math.sin(a) * r * 0.7, (pf.pop ? 2 : 4 - 3 * u) * SCALE, 0, 6.3); ctx.fill();
+    }
+  }
+}
+function drawStars(cw, ch, now) {
+  for (let i = stars.length - 1; i >= 0; i--) {
+    const s0 = stars[i], u = (now - s0.t0) / 1400;
+    if (u >= 1) { stars.splice(i, 1); continue; }
+    const x = (s0.x + s0.dx * u * 0.45) * cw, y = (s0.y + u * 0.18) * ch;
+    const g = ctx.createLinearGradient(x, y, x - s0.dx * 120 * SCALE, y - 50 * SCALE);
+    g.addColorStop(0, "rgba(255,250,210," + (1 - u).toFixed(2) + ")"); g.addColorStop(1, "rgba(255,250,210,0)");
+    ctx.strokeStyle = g; ctx.lineWidth = 2 * SCALE; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - s0.dx * 120 * SCALE, y - 50 * SCALE); ctx.stroke();
+    ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(x, y, 2.5 * SCALE, 0, 6.3); ctx.fill();
+  }
+  if (wishStar && now > wishStar.until) { wishStar = null; $("#wish").classList.add("hidden"); }
+}
+function updateHudLive(now) {
+  if (!me) return;
+  const hpb = $("#hpbar"), loc = curLoc(), show = me.hp < me.max_hp || /^(mine|deep)/.test(loc);
+  hpb.classList.toggle("hidden", !show);
+  if (show) { hpb.querySelector(".fill").style.width = (100 * me.hp / me.max_hp).toFixed(0) + "%"; hpb.querySelector(".label").textContent = "♥ " + me.hp + " / " + me.max_hp; hpb.classList.toggle("hurt", now - hurtAt < 150); }
+  const d = state && state.derby && state.derby[prefs.name];
+  $("#derby").classList.toggle("hidden", !d);
+  if (d) $("#derby").textContent = "🎣 Derby  " + Math.max(0, d[0]) + "s  ·  " + d[1] + " fish";
+}
+function wish() { if (wishStar) { send({ t: "wish", id: wishStar.id }); wishStar = null; $("#wish").classList.add("hidden"); } }
+// ------------------------------------------------------------------ generic windows: the server sends rows, we draw them
+function hatIcon(k) {
+  const c = document.createElement("canvas"); c.width = 32; c.height = 32; const g = c.getContext("2d"); g.imageSmoothingEnabled = false;
+  const custom = k !== "cowboy" && k !== "none";
+  g.drawImage(charSprite("girl", "down", 0, "#e8dcc0", custom ? "none" : k), 0, 0, 32, 32, 0, 2, 32, 32);
+  if (custom && Art.hatSprite(k, "down")) g.drawImage(Art.hatSprite(k, "down"), 0, 2);
+  return c;
+}
+function npcIcon(name) {
+  const look = (catalog.npcs || {})[name] || ["boy", "white", "none"];
+  const c = document.createElement("canvas"); c.width = 32; c.height = 32; const g = c.getContext("2d"); g.imageSmoothingEnabled = false;
+  g.drawImage(charSprite(look[0], "down", 0, COLORS[look[1]] || "#ccc", look[2]), 0, 0, 32, 32, 0, 2, 32, 32);
+  return c;
+}
+function sprIcon(spr) { const c = document.createElement("canvas"); c.width = 32; c.height = 32; const g = c.getContext("2d"); g.imageSmoothingEnabled = false; g.drawImage(spr, 0, 0, 32, 32); return c; }
+function renderList(d, h2, body, foot) {
+  h2.textContent = d.title || "";
+  if (d.sub) body.appendChild(el("p", "lsub", d.sub));
+  (d.rows || []).forEach((r, i) => {
+    if (r.section) { body.appendChild(el("div", "lsec", r.section)); return; }
+    const row = el("div", "lrow" + (r.ok && r.act ? " ok" : "") + (r.dim ? " dim" : "") + (menu.cursor === i ? " cur" : ""));
+    let ic = null;
+    if (r.key && catalog.items[r.key]) ic = iconEl(r.key);
+    else if (r.hat) ic = hatIcon(r.hat);
+    else if (r.npc) ic = npcIcon(r.npc);
+    else if (r.horse) ic = sprIcon(Art.horseSprite(r.horse, "right", 0));
+    else if (r.swatch) { ic = el("div", "sw"); ic.style.background = COLORS[r.swatch]; }
+    else if (r.song) { ic = el("div", "sw", "♪"); ic.style.cssText = "background:#2a3a6a;color:#ffe066;text-align:center;line-height:28px;font-size:18px"; }
+    else ic = el("div", "sw"), ic.style.border = "0";
+    row.appendChild(ic);
+    const tx = el("div", "tx"); tx.appendChild(el("div", "lb", r.label || "")); if (r.info) tx.appendChild(el("div", "in", r.info)); row.appendChild(tx);
+    if (r.right) row.appendChild(el("span", "rt", r.right));
+    if (r.ok && r.act) row.onclick = () => { menu.cursor = i; send(r.act); if (!d.keep) closeMenu(); };
+    body.appendChild(row);
+  });
+  foot.textContent = d.foot || "Click a row (or arrows and Enter). Esc closes.";
+}
+function listKeys(e) {
+  const rows = (menu.data.rows || []), ok = rows.map((r, i) => r.ok && r.act ? i : -1).filter((i) => i >= 0);
+  if (!ok.length) return;
+  const at = Math.max(0, ok.indexOf(menu.cursor));
+  if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") { menu.cursor = ok[(at + 1) % ok.length]; renderMenu(); e.preventDefault(); }
+  else if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") { menu.cursor = ok[(at - 1 + ok.length) % ok.length]; renderMenu(); e.preventDefault(); }
+  else if (e.key === "Enter" || e.key === " ") { const r = rows[ok.includes(menu.cursor) ? menu.cursor : ok[0]]; send(r.act); if (!menu.data.keep) closeMenu(); e.preventDefault(); }
+}
+
+// ------------------------------------------------------------------ festival minigames
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function startMinigame(game, seed) {
+  const r = mulberry(seed || 1), t0 = performance.now() + 1200;
+  minigame = { game, t0, score: 0, done: false, hits: 0, msg: "" };
+  if (game === "dance") { minigame.notes = []; let t = t0 + 800; for (let i = 0; i < 26; i++) { minigame.notes.push({ lane: Math.floor(r() * 4), t, hit: 0 }); t += 520 + Math.floor(r() * 3) * 180; } minigame.end = t + 900; }
+  if (game === "rodeo") { minigame.pos = 0; minigame.vel = 0; minigame.push = 0; minigame.end = t0 + 15000; minigame.r = r; }
+  if (game === "apples") { minigame.tries = 5; minigame.phase = r() * 6; minigame.end = Infinity; }
+  openMenu("mg", { game }); mode = "minigame";
+  mgKick();
+}
+let mgRaf = 0;
+function mgKick() { if (!mgRaf) mgRaf = requestAnimationFrame(mgFrame); }   // exactly one animation loop, however often the window redraws
+function mgFinish(score) {
+  if (!minigame || minigame.done) return;
+  minigame.done = true; minigame.score = Math.max(0, Math.min(100, Math.round(score)));
+  send({ t: "minigame_done", game: minigame.game, score: minigame.score });
+  setTimeout(() => { if (mode === "minigame") { mode = "menu"; } }, 1200);
+}
+function mgFrame(now) {
+  mgRaf = 0;
+  const mg = minigame; if (!mg || !menu || menu.kind !== "mg") return;
+  const cv = document.querySelector("#menu .mg canvas"); if (!cv) return;
+  const dt = Math.min(0.05, (now - (mg.last || now)) / 1000); mg.last = now;
+  const g = cv.getContext("2d"), W = cv.width, H = cv.height;
+  g.fillStyle = "#3a2a1a"; g.fillRect(0, 0, W, H);
+  const status = document.querySelector("#menu .mgs");
+  if (mg.game === "dance") {
+    const lanes = ["←", "↑", "↓", "→"], hitY = H - 40;
+    for (let l = 0; l < 4; l++) { g.fillStyle = l % 2 ? "#4a3626" : "#523c2a"; g.fillRect(30 + l * 80, 0, 70, H); }
+    g.fillStyle = "#f2e3bf"; g.fillRect(20, hitY - 2, W - 40, 4);
+    g.font = "bold 28px 'Pixelify Sans', sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+    for (const n of mg.notes) {
+      const y = hitY - (n.t - now) * 0.32; if (y < -30 || y > H + 30) continue;
+      g.fillStyle = n.hit === 2 ? "#6cc24a" : n.hit === 1 ? "#ffe066" : n.hit < 0 ? "#8a6a5a" : "#ff7eb6"; g.fillText(lanes[n.lane], 65 + n.lane * 80, y);
+      if (!n.hit && now - n.t > 200) n.hit = -1;
+    }
+    for (let l = 0; l < 4; l++) { g.fillStyle = "rgba(242,227,191,.35)"; g.fillText(lanes[l], 65 + l * 80, hitY); }
+    const total = mg.notes.length, got = mg.notes.reduce((a, n) => a + (n.hit === 2 ? 1 : n.hit === 1 ? 0.6 : 0), 0);
+    status.textContent = now < mg.t0 ? "Get ready... the fiddle's starting!" : "Hit the arrows on the line!  " + Math.round(100 * got / total) + "%";
+    if (now > mg.end) mgFinish(100 * got / total);
+  } else if (mg.game === "rodeo") {
+    if (now > mg.t0 && !mg.done) {
+      if (Math.random() < 2.1 * dt) mg.kick = (mg.r() - 0.5) * 3.2;
+      mg.vel += ((mg.kick || 0) + mg.pos * 1.4 - mg.push * 2.6) * dt; mg.vel *= Math.pow(0.985, dt * 60); mg.pos += mg.vel * dt;
+      if (Math.abs(mg.pos) > 1) mgFinish(100 * Math.min(1, (now - mg.t0) / 15000));
+      if (now > mg.end) mgFinish(100);
+    }
+    // the arena: sky, the back fence, churned dirt, and the balance bar up top
+    g.fillStyle = "#8ec8e8"; g.fillRect(0, 0, W, 96); g.fillStyle = "#c9a66b"; g.fillRect(0, 96, W, H - 96);
+    for (let x = 6; x < W; x += 9) { g.fillStyle = (x * 7) % 3 ? "#b8925a" : "#d8b880"; g.fillRect(x, 110 + (x * 13) % 90, 3, 2); }
+    g.fillStyle = "#8a5a2a"; for (let x = 0; x < W; x += 36) g.fillRect(x + 4, 66, 6, 34); g.fillStyle = "#a5713f"; g.fillRect(0, 72, W, 6); g.fillRect(0, 88, W, 6);
+    g.fillStyle = "rgba(43,33,24,.55)"; g.fillRect(16, 12, W - 32, 26);
+    g.fillStyle = "#b8463a"; g.fillRect(20, 16, W - 40, 18); g.fillStyle = "#6cc24a"; g.fillRect(W / 2 - 60, 16, 120, 18);
+    const nx = W / 2 + Math.max(-1, Math.min(1, mg.pos)) * (W / 2 - 24); g.fillStyle = "#f4ead2"; g.fillRect(nx - 3, 10, 6, 30); g.fillStyle = "#2b2118"; g.fillRect(nx - 1, 12, 2, 26);
+    const lean = Math.max(-1, Math.min(1, mg.pos)) * 0.5, buck = !mg.done && now > mg.t0 && Math.floor(now / 180) % 2, cx = W / 2, cy = 150;
+    g.fillStyle = "rgba(0,0,0,.2)"; g.fillRect(cx - 70, cy + 58, 140, 7);
+    g.save(); g.translate(cx, cy); g.rotate(lean + (buck ? -0.05 : 0.04)); g.imageSmoothingEnabled = false;
+    g.drawImage(Art.bullSprite(buck), -84, -66 + (buck ? -5 : 0), 168, 132);
+    g.drawImage(charSprite(prefs.sprite, "right", 0, COLORS[prefs.color], prefs.hat), 0, 0, 32, 48, -22 + (buck ? 3 : 0), -96 + (buck ? -9 : 0), 48, 72);
+    g.restore();
+    status.textContent = now < mg.t0 ? "Hold on tight! Lean with ← → to stay in the green." : mg.done ? "Ride over!" : "Hang on! " + ((now - mg.t0) / 1000).toFixed(1) + "s / 15s";
+  } else if (mg.game === "apples") {
+    const ringY = 120, ay = ringY + Math.sin(now / 260 + mg.phase) * 70;
+    g.fillStyle = "#3a6ab0"; g.fillRect(40, 60, W - 80, H - 70); g.fillStyle = "#5a8ad0"; g.fillRect(40, 60, W - 80, 8);
+    g.strokeStyle = "#ffe066"; g.lineWidth = 4; g.strokeRect(W / 2 - 34, ringY - 18, 68, 36);
+    g.fillStyle = "#d0283a"; g.beginPath(); g.arc(W / 2, ay, 14, 0, 6.3); g.fill(); g.fillStyle = "#8a5a2a"; g.fillRect(W / 2 - 1, ay - 20, 3, 8);
+    mg.ay = ay; mg.ring = ringY;
+    status.textContent = "Space (or E) to bob when the apple is in the ring!  Tries left: " + mg.tries + "  ·  apples: " + mg.hits + (mg.msg ? "  ·  " + mg.msg : "");
+  }
+  mgKick();
+}
+function mgKey(e) {
+  const mg = minigame; if (!mg || mg.done) { if (e.key === "Escape") { closeMenu(); mode = "play"; } return; }
+  const now = performance.now();
+  if (e.key === "Escape") { mgFinish(mg.game === "rodeo" ? 100 * Math.min(1, (now - mg.t0) / 15000) : 0); return; }
+  if (mg.game === "dance") {
+    const lane = { ArrowLeft: 0, a: 0, A: 0, ArrowUp: 1, w: 1, W: 1, ArrowDown: 2, s: 2, S: 2, ArrowRight: 3, d: 3, D: 3 }[e.key];
+    if (lane == null) return; e.preventDefault();
+    let best = null; for (const n of mg.notes) if (!n.hit && n.lane === lane && Math.abs(n.t - now) < 220 && (!best || Math.abs(n.t - now) < Math.abs(best.t - now))) best = n;
+    if (best) { best.hit = Math.abs(best.t - now) < 90 ? 2 : 1; sfx("pop"); }
+  } else if (mg.game === "rodeo") {
+    if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") { mg.push = -1; e.preventDefault(); }
+    if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") { mg.push = 1; e.preventDefault(); }
+  } else if (mg.game === "apples" && (e.key === " " || e.key === "e" || e.key === "E" || e.key === "Enter")) {
+    e.preventDefault(); if (mg.tries <= 0) return;
+    mg.tries--; if (Math.abs(mg.ay - mg.ring) < 16) { mg.hits++; mg.msg = "Got one!"; sfx("harvest"); } else { mg.msg = "Splash!"; sfx("water"); }
+    if (mg.tries === 0) mgFinish(mg.hits * 20);
+  }
+}
+window.addEventListener("keyup", (e) => { if (minigame && minigame.game === "rodeo" && /^(ArrowLeft|ArrowRight|a|A|d|D)$/.test(e.key)) minigame.push = 0; });
+
+// ------------------------------------------------------------------ the bard's songs (each one its own little tune)
+let songTimer = null;
+function songNotes(id) {
+  let h = 0; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const r = mulberry(h), scales = [[0, 2, 4, 7, 9, 12, 14, 16], [0, 2, 3, 5, 7, 8, 10, 12], [0, 2, 4, 5, 7, 9, 11, 12], [0, 3, 5, 7, 10, 12, 15, 17]];
+  const scale = scales[h % 4], root = 220 * Math.pow(2, (h % 7) / 12), beat = 0.24 + (h % 3) * 0.06, out = [];
+  let deg = 2;
+  for (let i = 0; i < 32; i++) { deg = Math.max(0, Math.min(scale.length - 1, deg + Math.floor(r() * 5) - 2)); out.push([root * Math.pow(2, scale[deg] / 12) * 2, i * beat, beat * (r() < 0.2 ? 2 : 1)]); }
+  return { notes: out, beat, root };
+}
+function stopSong() { if (songTimer) { clearTimeout(songTimer); songTimer = null; } }
+function playSong(id) {
+  if (!audio) return; stopSong();
+  const { notes, beat, root } = songNotes(id), t0 = audio.currentTime + 0.05;
+  for (const [f, at, dur] of notes) {
+    const o = audio.createOscillator(), g = audio.createGain(); o.type = "triangle"; o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t0 + at); g.gain.exponentialRampToValueAtTime(0.06, t0 + at + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + dur * 0.95);
+    o.connect(g).connect(audio.destination); o.start(t0 + at); o.stop(t0 + at + dur);
+  }
+  for (let i = 0; i < 8; i++) { const o = audio.createOscillator(), g = audio.createGain(); o.type = "sine"; o.frequency.value = root * (i % 2 ? 0.75 : 0.5); g.gain.setValueAtTime(0.04, t0 + i * beat * 4); g.gain.exponentialRampToValueAtTime(0.0001, t0 + (i + 1) * beat * 4); o.connect(g).connect(audio.destination); o.start(t0 + i * beat * 4); o.stop(t0 + (i + 1) * beat * 4); }
+  songTimer = setTimeout(() => { songTimer = null; if (music && music.song === id) playSong(id); }, notes.length * beat * 1000 + 600);
+}
+function aheadExtra(loc, fx, fy) {
+  /* what a villager, animal, machine, bug or monster ahead of you is (or null) */
+  for (const name in npcViz) { const v = npcViz[name]; if (v.loc === loc && Math.round(v.x) === fx && Math.round(v.y) === fy) {
+    const hold = heldItem(), giftable = hold && catalog.items[hold] && !["gear", "weapon", "machine", "key", "ammo", "treat"].includes(catalog.items[hold].kind);
+    if (name === "Mayor Hazel" && state.festival && loc === "town") return name + " - E for the " + ({ hoedown: "Spring Hoedown", rodeo: "Rodeo Roundup", fair: "Livestock Fair", fallfest: "Fallfest", derby: "Frost Fishing Derby", feast: "Winter Feast" }[state.festival] || "festival") + "!";
+    if (name === "Rowan" && state.concert) return name + " the bard - E to request a song.";
+    return name + (giftable ? " - E to chat, E again to give your " + catalog.items[hold].name + "." : " - E to talk."); } }
+  for (const pt of state.pets || []) if (pt.loc === loc && pt.x === fx && pt.y === fy) return pt.name + " the " + pt.kind + " - E to pet.";
+  if (loc === "farm") for (const c of state.chickens || []) if (c.x === fx && c.y === fy) return c.name + " the chicken - " + (c.egg ? "E to collect an egg!" : "no egg yet.");
+  const d = (loc === "farm" ? tiles : areaTiles(loc))[fx + "," + fy];
+  if (d && d.m) { const it = catalog.items[d.m[0]]; return it.name + " - " + (d.m[1] === 2 ? "E to collect " + catalog.items[d.m[2]].name + "!" : d.m[1] === 1 ? "working..." : d.m[0] === "craft_table" ? "E to craft." : d.m[0] === "tailor_table" ? "E to sew and dye." : "hold an ingredient and press E."); }
+  const bug = ((state.bugs || {})[loc] || {})[fx + "," + fy]; if (bug) return catalog.items[bug].name + " - " + (heldItem() === "bug_net" ? "E to swing the net!" : "hold a bug net to catch it.");
+  if (((state.digs || {})[loc] || []).includes(fx + "," + fy)) return "Something wriggles in the ground - dig it with the hoe.";
+  for (const mb of (state.mobs || {})[loc] || []) if (mb.x === fx && mb.y === fy) return "A monster! Hold a weapon and press E (a monster treat might tame a weakened one).";
+  for (const c of (state.critters || {})[loc] || []) if (c.x === fx && c.y === fy) return "Wild game - a bow, rifle or slingshot can bag it.";
+  if (/^deep/.test(loc) && (curMap()[fy] || "")[fx] === "Z") return "A treasure chest - E to open it.";
+  return null;
+}
 let _ox = 0, _oy = 0;
 function drawBubble(x, y, text) {
   ctx.font = "bold " + 4.5 * SCALE + "px 'Trebuchet MS', sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -1386,6 +1821,7 @@ function drawTag(x, y, text) {
   ctx.fillStyle = "#fff4dc"; ctx.fillText(text, x, y - h / 2);
 }
 
+$("#wish").onclick = () => { wish(); canvas.focus(); };
 $("#menu .xbtn").onclick = () => { if (mode === "fish") endFishing(false); else if (menu && menu.kind === "proposal") { send({ t: "propose_answer", yes: false }); closeMenu(); } else closeMenu(); };
 setupLogin();
 requestAnimationFrame(render);

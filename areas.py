@@ -407,8 +407,7 @@ def build_mine(level):
         gr.set(0, y, "R")
         gr.set(W - 1, y, "R")
     gr.set(*up, "U")
-    if level < 3:
-        gr.set(*down, "D")
+    gr.set(*down, "D")              # level 3's ladder leads down into the Depths
     gr.scatter(rng, "o", 6, only="v", gap=3)
     gr.set(up[0] + 2, up[1] - 1, "l")
     gr.set(down[0] - 2, down[1] + 1, "l")
@@ -459,6 +458,7 @@ def build_frontier():
         building("bank", "BANK", 26, 10, 7, 6, "bank"),
         building("sheriff", "SHERIFF", 35, 10, 7, 6, "sheriff"),
         building("stable", "STABLE", 45, 10, 8, 6, None, "the horses"),
+        building("butcher", "BUTCHER", 54, 10, 6, 6, "butcher"),
     ]
     gr.rect(3, 17, 57, 2, ":")
     for b in B:
@@ -557,6 +557,7 @@ INTERIORS = {
                 "#...............#", "#p.....rrrr....p#", "########x########"],
     "bank": ["###W#####W###", "#kk.SSnSS.kk#", "#...........#", "#.rrrrrrrr..#", "#p.........p#", "######x######"],
     "sheriff": ["###W#####W###", "#kk..n....kk#", "#...........#", "#.tt....b.b.#", "#.tt.......p#", "######x######"],
+    "butcher": ["###W####W###", "#ii.SSnSS.i#", "#..........#", "#.tt....kk.#", "#p........p#", "######x#####"],
 }
 # fix any row that lost its closing wall while typing
 for _k, _rows in INTERIORS.items():
@@ -566,7 +567,7 @@ KEEPERS = {
     "store": "Bram", "saloon": "Rusty", "hall": "Mayor Hazel", "museum": "Professor Fern", "clinic": "Doc Alder",
     "smith": "Ingrid", "bakery": "Juniper", "post": "Pip", "carpenter": "Oakley", "fishshop": "Old Tomas",
     "lighthouse": "Wren", "cabin": "Ranger Moss", "guild": "Captain Ash", "tiki": "Coco", "assay": "Prospector Gus",
-    "wsaloon": "Dolly", "bank": "Mr. Penny", "sheriff": "Sheriff Boone",
+    "wsaloon": "Dolly", "bank": "Mr. Penny", "sheriff": "Sheriff Boone", "butcher": "Hank",
 }
 KEEPER_LINES = {
     "Bram": ["Welcome to the Mercantile! Seeds, saplings, the lot.", "Fresh stock every season. Have a look round."],
@@ -675,7 +676,11 @@ def entry_of(interior):
 
 
 def find(area, ch):
-    for y, row in enumerate(MAPS[area]):
+    return find_rows(MAPS[area], ch)
+
+
+def find_rows(rows, ch):
+    for y, row in enumerate(rows):
         if ch in row:
             return (row.index(ch), y)
     return (1, 1)

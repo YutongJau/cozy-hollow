@@ -171,6 +171,45 @@ Everything you find sells at the shipping bin. Exploring, mining, gems and
 rides all have milestones in the journal. When the host updates the game,
 browser tabs reload by themselves.
 
+### Living in the valley
+
+* **Villagers** keep their own hours: they walk to work in the morning, take
+  lunch, wander the square and head to the saloon or home at night (shops
+  close when the keeper is out). Face someone and press E to chat; press E
+  again while holding something to give it as a gift. Everyone has things
+  they love, like and hate, and friendship grows hearts (J, then the friends
+  list). The notice-board requests come from these same folks.
+* **Festivals** fill the town square on set days of each 7-day season: the
+  Spring **Hoedown** (a line dance) and **Rodeo Roundup** (stay on the bull
+  15 seconds for the champion's hat), the Summer **Livestock Fair** (show off
+  your best goods for a ribbon), **Fallfest** (bob for apples, weigh your
+  biggest pumpkin), the Winter **Frost Fishing Derby** and the **Winter
+  Feast** (a potluck and a gift swap). Talk to Mayor Hazel.
+* **Town projects**: the Town Hall takes donations for streetlamps, the
+  chicken coop, a stable, a bandstand, the gallery, the harbor, landscaping
+  and guest cottages. Each one opens something new, and some bring new
+  neighbours, so the town grows.
+* **Making things**: C crafts at a crafting table (or anywhere once you have
+  a toolbelt). Machines turn milk into cheese, fruit into jam, vegetables
+  into pickles, eggs into mayonnaise and stone into gems; bee houses make
+  honey on their own. Cook at the farmhouse fireplace; U eats what you hold
+  for health and a little buff. The tailoring table sews hats.
+* **Animals**: chickens (once the coop is built) lay eggs; adopt a dog or a
+  cat at the clinic; buy a horse in Dusty Gulch and press R to ride.
+* **The museum** collects bugs (catch them with a net), fish, fossils and
+  artifacts (dig up wriggling spots with the hoe) and paintings from the
+  travelling art dealer, who sometimes sells forgeries.
+* **Adventure**: monsters live in the mine (swords, a slingshot, a bow or a
+  rifle; a monster treat can tame a weakened one into a companion). The
+  ladder at the bottom of the mine leads to the Depths, new floors every day
+  with treasure chests. Hunt game in the wild and take it to Hank the butcher.
+* **Little wonders**: wish on shooting stars at night (V) and find star
+  fragments on the beach next morning; shoot down presents floating by on
+  balloons; Rowan the bard plays the bandstand some evenings and teaches you
+  songs (M plays them); a mystery ticket sails the boat to a new island.
+* **Reshaping the farm**: the landscaping shovel digs ponds and rivers and
+  fills them back in; lay path stones and build bridges.
+
 ## Managing the farm
 
 ```bash

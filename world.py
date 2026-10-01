@@ -272,6 +272,12 @@ MILESTONES = [
     ("quests", 1, "Helping Hands"), ("quests", 10, "Pillars of the Valley"),
     ("explored", 3, "Wanderer"), ("explored", 9, "Valley Explorer"), ("mined", 1, "Rock Bottom"),
     ("mined", 100, "Prospectors"), ("gems", 1, "Shiny Things"), ("rides", 1, "All Aboard"),
+    ("crafted", 1, "Handy"), ("crafted", 25, "Master Crafter"), ("cooked", 1, "First Supper"), ("cooked", 20, "Chef"),
+    ("artisan", 10, "Artisan"), ("eggs", 1, "Egg-cellent"), ("donated", 1, "Curator"), ("donated", 30, "Museum Patron"),
+    ("bugs", 10, "Bug Catcher"), ("dug", 5, "Archaeologist"), ("gifts", 10, "Good Neighbour"), ("hearts", 5, "Well Loved"),
+    ("monsters", 1, "Monster Hunter"), ("monsters", 100, "Slayer"), ("tamed", 1, "Beast Friend"), ("depth_record", 5, "Spelunker"),
+    ("hunted", 1, "Hunter"), ("wishes", 1, "Wishful"), ("voyages", 1, "Castaway"), ("songs", 3, "Music Lover"),
+    ("projects", 1, "Town Builder"), ("projects", 8, "Founders of Hollow Town"), ("landscaped", 10, "Landscaper"),
 ]
 
 # --------------------------------------------------------------------------
@@ -284,7 +290,7 @@ MILESTONES = [
 #   o  rock                  f  flower bed
 #   B  barrels   c  crates   h  hay bale   m  mailbox   l  lamp post
 #   b  bench     w  well     (props: pretty, and they block the way)
-WALKABLE = set(".:,fGd")
+WALKABLE = set(".:,fGdH")
 TERRAIN_NAMES = {
     ".": "grass", "#": "fence", "T": "tree", "~": "pond", ":": "path",
     ",": "sand", "W": "farmhouse", "+": "farmhouse door", "S": "shop",
@@ -473,11 +479,21 @@ def fmt_duration(sec):
     return "%dd%dh" % (d, rem // 3600)
 
 
+ROOM_TITLES = {"house": "the farmhouse", "shop": "the seed shop", "barn": "the barn", "assay": "the general store", "cabin": "the ranger's cabin",
+               "wsaloon": "the gulch saloon", "coop": "the chicken coop", "smith": "the blacksmith's", "carpenter": "the carpenter's workshop",
+               "butcher": "the butcher's shop", "sheriff": "the sheriff's office", "guild": "the Adventurers' Guild", "tiki": "the tiki hut"}
+for _bl in AR.BUILDINGS.values():                # everywhere else is called what its sign says
+    for _b in _bl:
+        if _b.get("to") in INTERIORS and _b.get("label"):
+            ROOM_TITLES.setdefault(_b["to"], "the " + _b["label"].title())
+
+
 def catalog():
     """Everything a client needs to name and draw things (JSON-able)."""
     return dict(
         items={k: dict(name=v["name"], kind=v["kind"], sell=v["sell"], color=v["color"],
-                       crop=v.get("crop"), tree=v.get("tree"), price=v.get("price"), rare=bool(v.get("rare")))
+                       crop=v.get("crop"), tree=v.get("tree"), price=v.get("price"), rare=bool(v.get("rare")),
+                       info=crafting.describe(k))
                for k, v in ITEMS.items()},
         crops={k: dict(name=c["name"], grow=c["grow"], regrow=c["regrow"], sell=c["sell"],
                        seasons=c["seasons"], color=c["color"], yield_=list(c["yield_"]),
@@ -495,14 +511,36 @@ def catalog():
         no_chest=sorted(NO_CHEST),
         areas={a: AR.MAPS[a] for a in AR.AREAS}, area_names=AR.AREA_NAMES, buildings=AR.BUILDINGS,
         portals=sorted([k[0], k[1], k[2]] for k in PORTALS), npcs=AR.NPCS, keepers=AR.KEEPERS,
-        area_terrain=AR.TERRAIN_NAMES, ores={a: [k for k, w in v] for a, v in AR.ORE.items()},
+        area_terrain=AR.TERRAIN_NAMES, rooms=ROOM_TITLES, ores={a: [k for k, w in v] for a, v in AR.ORE.items()},
     )
 
 
 # --------------------------------------------------------------------------
 # World
 # --------------------------------------------------------------------------
-class World:
+# the feature modules: each registers its items when imported and adds a mixin to World
+from valley import crafting, animals, villagers, museum, festivals, skies, combat, landscape, townhall   # noqa: E402
+HOOKS = ["craft", "animals", "folk", "museum", "fest", "sky", "combat", "land", "town"]
+MAX_HP = 100
+
+
+class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Museum, festivals.Festivals, skies.Skies,
+            combat.Combat, landscape.Landscape, townhall.TownHall):
+    def _run(self, phase, *args):
+        """Call every feature module's hook for this phase (init, load, save, tick, fast, snap, join, leave, pub, priv)."""
+        for n in HOOKS:
+            f = getattr(self, "_%s_%s" % (phase, n), None)
+            if f:
+                f(*args)
+
+    def _init_core(self, now):
+        self.edits = {}            # loc -> {"x,y": terrain char}: land reshaped, buildings raised
+        self.xbuildings = {}       # loc -> [building]: buildings put up after the map was drawn (coops, cottages)
+        self.xportals = {}         # (loc, x, y) -> (loc2, x2, y2, facing) for those buildings
+        self.amaps = {a: list(AR.MAPS[a]) for a in AR.AREAS}
+        self.dyn_maps = {}         # generated places (mystery islands, dungeon floors): loc -> rows
+        self.dyn_rev = {}          # loc -> revision, so clients refetch a regenerated map
+
     def __init__(self):
         now = time.time()
         self.name = "Cozy Hollow"
@@ -532,6 +570,8 @@ class World:
         self.dirty = True
         self.out = []
         self._weather_bucket = None
+        self._init_core(now)
+        self._run("init", now)
         self._starter_patch(now)
         self.new_quest(now)
 
@@ -551,7 +591,7 @@ class World:
 
     # ---------------------------------------------------------------- persistence
     def to_dict(self):
-        return dict(
+        out = dict(
             version=1, name=self.name, created=self.created, seed=self.seed,
             coins=self.coins,
             tiles={"%d,%d" % pos: t for pos, t in self.tiles.items()},
@@ -559,8 +599,11 @@ class World:
             quest=self.quest, forage_timer=self.forage_timer, log=self.log,
             last_tick=self.last_tick, storage=self.storage, cows=self.cows, marriages=self.marriages, gift_cow=True,
             chests=self.chests, ore_timer=self.ore_timer,
-            atiles={a: {"%d,%d" % pos: t for pos, t in ts.items()} for a, ts in self.atiles.items()},
+            atiles={a: {"%d,%d" % pos: t for pos, t in ts.items()} for a, ts in self.atiles.items() if a not in self.dyn_maps},
+            edits=self.edits, xbuildings=self.xbuildings,
         )
+        self._run("save", out)
+        return out
 
     @classmethod
     def from_dict(cls, d):
@@ -571,6 +614,13 @@ class World:
         w.coins = d.get("coins", 0)
         w.tiles = {}
         w.map = build_map()
+        w.edits = {}
+        for loc, ed in (d.get("edits") or {}).items():
+            if loc == "farm":
+                for k, ch in ed.items():
+                    x, y = (int(v) for v in k.split(","))
+                    if 0 <= x < MAP_W and 0 <= y < MAP_H:
+                        w.map[y] = w.map[y][:x] + ch + w.map[y][x + 1:]
         for k, t in d.get("tiles", {}).items():
             x, y = k.split(",")
             x, y = int(x), int(y)
@@ -608,6 +658,14 @@ class World:
         w.cooldowns = {}
         w.forage_timer = d.get("forage_timer", 0.0)
         w.ore_timer = d.get("ore_timer", 0.0)
+        w._init_core(w.last_tick)
+        for loc, ed in (d.get("edits") or {}).items():
+            for k, ch in ed.items():
+                x, y = (int(v) for v in k.split(","))
+                w.set_terrain(loc, x, y, ch)
+        for loc, bl in (d.get("xbuildings") or {}).items():
+            for b in bl:
+                w.add_building(loc, b, edit=False)
         w.atiles = {a: {} for a in AR.AREAS}
         for a, ts in (d.get("atiles") or {}).items():
             if a not in w.atiles:
@@ -623,10 +681,11 @@ class World:
             w.stock_areas(w.last_tick)
         w.log = d.get("log", [])
         w.last_tick = d.get("last_tick", time.time())
-        w.map = build_map()
         w.dirty = False
         w.out = []
         w._weather_bucket = None
+        w._run("init", w.last_tick)
+        w._run("load", d)
         return w
 
     def save(self, path):
@@ -667,7 +726,7 @@ class World:
     # ---------------------------------------------------------------- helpers
     def terrain(self, x, y, loc="farm"):
         if loc != "farm":
-            rows = INTERIORS.get(loc) or AR.MAPS.get(loc, [])
+            rows = self.rows_of(loc)
             if 0 <= y < len(rows) and 0 <= x < len(rows[0]):
                 return rows[y][x]
             return "#" if loc in INTERIORS else "C"
@@ -694,20 +753,20 @@ class World:
     def prune(self, pos):
         t = self.tiles.get(pos)
         if t is not None and not any(t.get(k) for k in
-                                     ("soil", "crop", "tree", "forage", "sprinkler")):
+                                     ("soil", "crop", "tree", "forage", "sprinkler", "machine")):
             del self.tiles[pos]
 
     def walkable(self, x, y, loc="farm"):
         if loc in INTERIORS:
-            return self.terrain(x, y, loc) in INTERIOR_WALK
+            return self.terrain(x, y, loc) in INTERIOR_WALK and not self.blocked_extra(loc, x, y)
         if loc != "farm":
-            return self.terrain(x, y, loc) in AR.AREA_WALK and not self.atiles[loc].get((x, y), {}).get("ore")
+            return self.terrain(x, y, loc) in AR.AREA_WALK and not self.atiles.get(loc, {}).get((x, y), {}).get("ore") and not self.blocked_extra(loc, x, y)
         if self.terrain(x, y) not in WALKABLE:
             return False
-        if self.cow_at(x, y) or self.chest_at(x, y):
+        if self.cow_at(x, y) or self.chest_at(x, y) or self.blocked_extra("farm", x, y):
             return False
         t = self.tiles.get((x, y))
-        return not (t and t.get("tree"))
+        return not (t and (t.get("tree") or t.get("machine")))
 
     def chest_at(self, x, y):
         for c in self.chests:
@@ -1009,6 +1068,8 @@ class World:
         stock.append(["fertilizer", ITEMS["fertilizer"]["price"]])
         stock.append(["sprinkler", ITEMS["sprinkler"]["price"]])
         stock.append(["cow", COW_PRICE])
+        if self.has_coop():
+            stock.append(["chicken", 300])
         return stock
 
     def new_quest(self, now):
@@ -1029,7 +1090,8 @@ class World:
             if item != prev:
                 break
         reward = int(n * ITEMS[item]["sell"] * 1.8) + 40
-        self.quest = dict(item=item, n=n, reward=reward, who=rng.choice(NPCS),
+        folk = sorted(getattr(self, "folk", None) or {})          # a neighbour who actually lives here pins the request up
+        self.quest = dict(item=item, n=n, reward=reward, who=rng.choice(folk or NPCS),
                           reason=rng.choice(REASONS), since=now)
         self.dirty = True
 
@@ -1059,7 +1121,7 @@ class World:
             return
         season = self.season_at(t)
         pool = [k for k in pool if season in FORAGE[k]["seasons"]]
-        rows = AR.MAPS[area]
+        rows = self.rows_of(area)
         rng = random.Random(int(t * 1000) ^ self.seed ^ hash(area) & 0xffff)
         for _ in range(60):
             x, y = rng.randint(1, len(rows[0]) - 2), rng.randint(1, len(rows) - 2)
@@ -1073,7 +1135,7 @@ class World:
         tiles = self.atiles[area]
         if sum(1 for tl in tiles.values() if tl.get("ore")) >= ORE_MAX[area]:
             return
-        rows, ground = AR.MAPS[area], AR.ORE_GROUND[area]
+        rows, ground = self.rows_of(area), AR.ORE_GROUND[area]
         rng = random.Random(int(t * 1000) ^ self.seed ^ (hash(area) & 0xffff) ^ 0x5a5a)
         kinds, weights = zip(*AR.ORE[area])
         for _ in range(60):
@@ -1161,12 +1223,129 @@ class World:
         if self.quest is None or now - self.quest["since"] > QUEST_REFRESH:
             self.new_quest(now)
         self.wander_cows(now)
+        self._run("tick", now)
         self.check_couples(now)
         self.run_proposal(now)
         self.run_wedding(now)
         if self.priest_bubble and self.priest_bubble[1] < now:
             self.priest_bubble = None
         return self.out
+
+    def fast(self, now):
+        """A quick tick (4 a second) for things that move fast: monsters, critters, balloons, arrows."""
+        self.out = []
+        self.moved = False
+        self._run("fast", now)
+        return self.out
+
+    # ---------------------------------------------------------------- the shape of the world
+    @staticmethod
+    def atile_view(t):
+        if t.get("forage"):
+            return {"g": t["forage"]}
+        if t.get("ore"):
+            return {"o": t["ore"]}
+        m = t.get("machine")
+        if m:
+            return {"m": [m["kind"], 2 if m.get("out") else (1 if m.get("ready") else 0), m.get("out")]}
+        if t.get("opened"):
+            return {"x": 1}
+        return None
+
+    def is_outdoor(self, loc):
+        return loc == "farm" or loc in self.amaps or loc in self.dyn_maps
+
+    def rows_of(self, loc):
+        if loc == "farm":
+            return self.map
+        return INTERIORS.get(loc) or self.amaps.get(loc) or self.dyn_maps.get(loc) or []
+
+    def set_terrain(self, loc, x, y, ch, record=True):
+        """Reshape the land: one tile of any outdoor map becomes ch (and the change is saved and sent to everyone)."""
+        rows = self.map if loc == "farm" else (self.amaps.get(loc) or self.dyn_maps.get(loc))
+        if rows is None or not (0 <= y < len(rows) and 0 <= x < len(rows[0])):
+            return False
+        rows[y] = rows[y][:x] + ch + rows[y][x + 1:]
+        if record and loc not in self.dyn_maps:
+            self.edits.setdefault(loc, {})["%d,%d" % (x, y)] = ch
+        self.dirty = True
+        return True
+
+    def add_building(self, loc, b, edit=True):
+        """Raise a building on an outdoor map after the fact (a coop, a cottage): footprint, door portal and interior exit."""
+        b = dict(b)
+        b.setdefault("door", (b["x"] + b["w"] // 2, b["y"] + b["h"] - 1))
+        b["door"] = tuple(b["door"])
+        self.xbuildings.setdefault(loc, [])
+        if not any(o["x"] == b["x"] and o["y"] == b["y"] for o in self.xbuildings[loc]):
+            self.xbuildings[loc].append(b)
+        for yy in range(b["y"], b["y"] + b["h"]):
+            for xx in range(b["x"], b["x"] + b["w"]):
+                self.set_terrain(loc, xx, yy, "@", record=edit)
+        dx, dy = b["door"]
+        if b.get("to") in INTERIORS:
+            rows = INTERIORS[b["to"]]
+            ex = next(((row.index("x"), y - 1) for y, row in enumerate(rows) if "x" in row), (1, 1))
+            self.xportals[(loc, dx, dy)] = (b["to"], ex[0], ex[1], (0, -1))
+            for y, row in enumerate(rows):
+                for x, ch in enumerate(row):
+                    if ch == "x":
+                        self.xportals[(b["to"], x, y)] = (loc, dx, dy + 1, (0, 1))
+        self.dirty = True
+        return b
+
+    def buildings_in(self, loc):
+        return AR.BUILDINGS.get(loc, []) + self.xbuildings.get(loc, [])
+
+    def portal(self, loc, x, y):
+        return self.xportals.get((loc, x, y)) or PORTALS.get((loc, x, y))
+
+    def blocked_extra(self, loc, x, y):
+        """Something a feature module put on the tile (a chicken, a machine, a trap, a villager's stall) blocks the way."""
+        for n in HOOKS:
+            f = getattr(self, "_block_" + n, None)
+            if f and f(loc, x, y):
+                return True
+        return False
+
+    def intercept(self, p, loc, fx, fy, now):
+        """E: the feature modules get the first look (a villager, an animal, a machine, a monster, a bug...)."""
+        for n in ("combat", "fest", "folk", "animals", "sky", "museum", "land", "craft", "town"):
+            f = getattr(self, "_use_" + n, None)
+            if f and f(p, loc, fx, fy, now):
+                return True
+        return False
+
+    def place_name(self, loc):
+        if loc in AR.AREA_NAMES:
+            return AR.AREA_NAMES[loc]
+        for n in HOOKS:
+            f = getattr(self, "_name_" + n, None)
+            name = f(loc) if f else None
+            if name:
+                return name
+        return loc
+
+    def fish_pool(self, loc):
+        for n in HOOKS:
+            f = getattr(self, "_fish_" + n, None)
+            pool = f(loc) if f else None
+            if pool:
+                return pool
+        return AR.AREA_FISH.get(loc)
+
+    def held(self, p):
+        return self.selected_item(p)
+
+    def facing_tile(self, p):
+        return p["x"] + p["facing"][0], p["y"] + p["facing"][1]
+
+    def online_in(self, loc):
+        return [q for q in self.players.values() if q.get("online") and q.get("loc", "farm") == loc]
+
+    def list_menu(self, p, mid, title, rows, sub="", foot="", keep=False):
+        """A generic window both clients can draw: rows of {key (item icon), label, info, right, act (message to send), ok}."""
+        self.out.append((p["name"], dict(t="open", menu="list", id=mid, title=title, sub=sub, rows=rows, foot=foot, keep=keep)))
 
     # ---------------------------------------------------------------- players
     def join(self, name, now, sprite=None, color=None, hat=None):
@@ -1193,7 +1372,11 @@ class World:
         p["online"] = True
         p["fishing"] = None
         p["last_seen"] = now
+        p.setdefault("hp", MAX_HP)
+        if p.get("loc", "farm") in self.dyn_maps or not (p.get("loc", "farm") in INTERIORS or self.is_outdoor(p.get("loc", "farm"))):
+            p["loc"], p["x"], p["y"] = "farm", SPAWN[0], SPAWN[1]     # the generated place they were in is gone
         self.give_tools(p)
+        self._run("join", p, now)
         self.dirty = True
         return self.out
 
@@ -1216,6 +1399,7 @@ class World:
                 spot = self.free_spot_near((p["x"], p["y"]) if p.get("loc", "farm") == "farm" else CHEST_HOME)
                 self.chests.append(dict(x=spot[0], y=spot[1]))
                 p["carry"] = None
+            self._run("leave", p, now)
             self.event("%s headed home for now." % name, now)
         return self.out
 
@@ -1225,19 +1409,23 @@ class World:
             bubble = None
         inv = p["inventory"]
         held = inv[min(p["selected"], len(inv) - 1)][0] if inv else None
-        return dict(name=p["name"], x=p["x"], y=p["y"], facing=p["facing"], held=held, hat=p.get("hat", "cowboy"),
+        d = dict(name=p["name"], x=p["x"], y=p["y"], facing=p["facing"], held=held, hat=p.get("hat", "cowboy"),
                     carry=p.get("carry"), spouse=self.spouse_of(p["name"]), loc=p.get("loc", "farm"),
                     color=p["color"], sprite=p.get("sprite", "boy"), online=bool(p.get("online")),
                     bubble=bubble[0] if bubble else None,
                     level=level_for(p["xp"]), title=TITLES[level_for(p["xp"])],
                     fishing=bool(p.get("fishing")))
+        self._run("pub", p, d, now)
+        return d
 
     def private_player(self, p):
         lvl = level_for(p["xp"])
         nxt = 60 * (lvl + 1) ** 2
-        return dict(inventory=p["inventory"], selected=p["selected"], loc=p.get("loc", "farm"),
-                    water=p["water"], xp=p["xp"], level=lvl, title=TITLES[lvl],
-                    next_xp=nxt, stats=p.get("stats", {}))
+        d = dict(inventory=p["inventory"], selected=p["selected"], loc=p.get("loc", "farm"),
+                 water=p["water"], xp=p["xp"], level=lvl, title=TITLES[lvl],
+                 next_xp=nxt, stats=p.get("stats", {}), hp=p.get("hp", MAX_HP), max_hp=MAX_HP)
+        self._run("priv", p, d)
+        return d
 
     def snapshot(self, now):
         tiles = {}
@@ -1253,6 +1441,9 @@ class World:
                 d["k"] = 1
             if tile.get("forage"):
                 d["g"] = tile["forage"]
+            m = tile.get("machine")
+            if m:
+                d["m"] = [m["kind"], 2 if m.get("out") else (1 if m.get("ready") else 0), m.get("out")]
             crop = tile.get("crop")
             if crop:
                 c = CROPS[crop["kind"]]
@@ -1277,20 +1468,22 @@ class World:
                 d["t"] = [tree["kind"], stage, tree["fruit"], int(frac * 100), int(eta)]
             if d:
                 tiles["%d,%d" % (x, y)] = d
-        return dict(
+        snap = dict(
             t="state", now=now, farm=self.name, season=self.season_at(now),
             day=self.day_at(now), year=self.year_at(now),
             weather=self.weather_at(now), coins=self.coins, sky=round(self.sky_hour(now), 2),
             players=[self.public_player(p, now) for p in self.players.values()],
             tiles=tiles, quest=self.quest,
-            areas={a: {"%d,%d" % pos: ({"g": t["forage"]} if t.get("forage") else {"o": t["ore"]}) for pos, t in ts.items()}
-                   for a, ts in self.atiles.items()}, milestones=len(self.milestones), storage=dict(self.storage), chests=list(self.chests),
+            areas={a: {"%d,%d" % pos: self.atile_view(t) for pos, t in ts.items() if self.atile_view(t)} for a, ts in self.atiles.items()}, milestones=len(self.milestones), storage=dict(self.storage), chests=list(self.chests),
             cows=[dict(id=c["id"], name=c["name"], x=c["x"], y=c["y"], f=c.get("facing", 1), w=1 if c.get("steps", 0) > 0 else 0,
                        milk=c.get("milk", 0) >= MILK_EVERY, pct=int(100 * c.get("milk", 0) / MILK_EVERY)) for c in self.cows],
             priest=dict(x=PRIEST[0], y=PRIEST[1], bubble=self.priest_bubble[0] if self.priest_bubble and self.priest_bubble[1] > now else None),
             wedding=(dict(couple=self.wedding["couple"], phase=self.wedding["phase"], guests=self.wedding["guests"],
                           altar=ALTAR, t=now - self.wedding["t0"]) if self.wedding else None),
+            edits=self.edits, xb=self.xbuildings, dyn=self.dyn_rev, xp=sorted([k[0], k[1], k[2]] for k in self.xportals),
         )
+        self._run("snap", snap, now)
+        return snap
 
     # ---------------------------------------------------------------- actions
     def apply(self, name, msg, now):
@@ -1316,14 +1509,20 @@ class World:
         p["facing"] = [dx, dy]
         nx, ny = p["x"] + dx, p["y"] + dy
         loc = p.get("loc", "farm")
-        dest = PORTALS.get((loc, nx, ny))
+        if self.terrain(nx, ny, loc) == "D" and (loc == "mine3" or loc.startswith("deep")) and not self.portal(loc, nx, ny):
+            self.link_down(loc, nx, ny)
+        dest = self.portal(loc, nx, ny)
         if dest:
             if p.get("carry"):
                 return self.say(p, "The chest stays on the farm. Set it down first (E).", "warn")
             return self.travel(p, dest, now)
         if self.walkable(nx, ny, loc):
+            ox, oy = p["x"], p["y"]
+            pet_was = (p["pet"].get("x"), p["pet"].get("y")) if p.get("pet") and p["pet"].get("loc") == loc else None
             p["x"], p["y"] = nx, ny
             p["fishing"] = None
+            self.pet_follow(p, ox, oy)
+            self.companion_follow(p, ox, oy, pet_was)
             self.dirty = True
 
     def travel(self, p, dest, now, text=None):
@@ -1340,7 +1539,7 @@ class World:
                             q.get("online") and (q["x"], q["y"]) == (sx, sy) and q.get("loc", "farm") == "farm" for q in self.players.values()):
                         c["x"], c["y"] = sx, sy
                         break
-        if to in OUTDOOR and to != "farm":
+        if self.is_outdoor(to) and to != "farm" and to in AR.AREA_NAMES:
             seen = p.setdefault("seen", [])
             if to not in seen:
                 seen.append(to)
@@ -1353,8 +1552,9 @@ class World:
         if to in INTERIORS:
             return self.say(p, {"house": "Home sweet home.", "shop": "Marigold: Welcome in! Have a look around.",
                                 "barn": "It smells of hay in here."}.get(to, "You step inside."))
-        if to in OUTDOOR and to != frm and frm in OUTDOOR:
-            self.say(p, "~ %s ~" % AR.AREA_NAMES[to].replace("the ", "The ", 1), "event")
+        if self.is_outdoor(to) and to != frm and self.is_outdoor(frm):
+            self.say(p, "~ %s ~" % self.place_name(to).replace("the ", "The ", 1), "event")
+        self._run("arrive", p, frm, now)
 
     def act_face(self, p, msg, now):
         """Turn without stepping (used by click-to-act)."""
@@ -1374,9 +1574,11 @@ class World:
         """E: use what you hold on the tile ahead (or the one you stand on)."""
         fx, fy = p["x"] + p["facing"][0], p["y"] + p["facing"][1]
         loc = p.get("loc", "farm")
+        if self.intercept(p, loc, fx, fy, now):
+            return
         if loc in AR.INTERIORS:
             return self.interact_inside(p, loc, fx, fy, now)
-        if loc in OUTDOOR and loc != "farm":
+        if self.is_outdoor(loc) and loc != "farm":
             return self.interact_area(p, loc, fx, fy, now)
         if loc != "farm":
             ch = self.terrain(fx, fy, loc)
@@ -1533,6 +1735,8 @@ class World:
                 return self.harvest(p, t, tl, now)
             if tl.get("forage"):
                 return self.pick_forage(p, t, tl, now)
+        if kind == "food":
+            return self.act_eat(p, {}, now)
         if self.terrain(*pos) in ".d" or self.tiles.get(pos, {}).get("soil"):
             return self.say(p, "Pick a tool with 1-6: hoe to till farmland, seeds to plant, can to water, scythe to harvest.")
         self.say(p, "Nothing to do here.")
@@ -1542,12 +1746,10 @@ class World:
         ch = self.terrain(fx, fy, loc)
         keeper = AR.KEEPERS.get(loc)
         if ch in "nS" and keeper:
-            if loc == "store":
-                self.say(p, "%s: %s" % (keeper, random.choice(AR.KEEPER_LINES[keeper])))
-                return self.act_shop(p, {}, now)
-            if loc == "post":
-                return self.say(p, "%s hands you a letter. %s" % (keeper, random.choice(MAIL)), "event")
-            return self.say(p, "%s: %s" % (keeper, random.choice(AR.KEEPER_LINES[keeper])))
+            if not self.npc_present(keeper, loc):
+                h = self.sky_hour(now)
+                return self.say(p, "Nobody's behind the counter. %s" % ("Closed for the night - back in the morning." if h >= 21 or h < 7 else "%s must be out for a bit." % keeper))
+            return self.keeper_counter(p, loc, keeper, now)
         if ch in AR.OBJECT_LINES:
             return self.say(p, AR.OBJECT_LINES[ch])
         lines = {"b": "A neatly made bed.", "t": "A sturdy table, a little sticky.", "f": "The fire crackles warmly.",
@@ -1557,9 +1759,89 @@ class World:
             return self.say(p, lines[ch])
         return self.say(p, "Nothing to do here.")
 
+    def keeper_counter(self, p, loc, keeper, now):
+        """What each shopkeeper does when you step up to their counter."""
+        hi = "%s: %s" % (keeper, random.choice(AR.KEEPER_LINES[keeper]))
+        if loc == "store":
+            self.say(p, hi)
+            rows = [dict(label="Seeds, saplings and cows", info="Bram stocks the same as Marigold's seed shop.", act=dict(t="shop_open"), ok=True, right="Browse")]
+            self.out.append((p["name"], dict(t="open", menu="close")))
+            return self.mercantile(p, rows)
+        if loc in ("saloon", "bakery", "wsaloon", "assay", "tiki"):
+            self.say(p, hi)
+            return self.shop_menu(p, {"saloon": "saloon", "bakery": "bakery", "wsaloon": "dolly", "assay": "gulch", "tiki": "tiki"}[loc])
+        if loc == "butcher":
+            self.say(p, hi)
+            return self.act_butcher(p, {}, now)
+        if loc == "hall":
+            return self.town_menu(p, now)
+        if loc == "museum":
+            return self.museum_menu(p, now)
+        if loc == "clinic":
+            rows = [dict(key="adopt_dog", label="Adopt a dog", info="A loyal friend who follows you everywhere.", act=dict(t="adopt", kind="dog"), ok=not p.get("pet"), right="Adopt"),
+                    dict(key="adopt_cat", label="Adopt a cat", info="An independent friend who follows you anyway.", act=dict(t="adopt", kind="cat"), ok=not p.get("pet"), right="Adopt"),
+                    dict(label="A check-up", info="Back to full health for 50g.", act=dict(t="heal"), ok=p.get("hp", MAX_HP) < MAX_HP and self.coins >= 50, right="50g")]
+            return self.list_menu(p, "clinic", "Doc Alder's Clinic", rows, sub="\"Strays turn up here all the time. Want to give one a home?\"")
+        if loc == "smith":
+            rows = [dict(key="sword_copper", label="Forge a Copper Sword", info="6 copper ore and 100g.", act=dict(t="forge", item="sword_copper"), ok=self.count(p, "copper_ore") >= 6 and self.coins >= 100, right="Forge"),
+                    dict(key="sword_iron", label="Forge an Iron Sword", info="6 iron ore and 300g.", act=dict(t="forge", item="sword_iron"), ok=self.count(p, "iron_ore") >= 6 and self.coins >= 300, right="Forge"),
+                    dict(key="sword_gold", label="Forge a Golden Sword", info="6 gold ore and 800g.", act=dict(t="forge", item="sword_gold"), ok=self.count(p, "gold_ore") >= 6 and self.coins >= 800, right="Forge"),
+                    dict(key="coal", label="Buy coal", info="20g a lump.", act=dict(t="forge", item="coal"), ok=self.coins >= 20, right="20g")]
+            return self.list_menu(p, "smith", "Ingrid's Smithy", rows, sub=hi, keep=True)
+        if loc == "fishshop":
+            rows = [dict(key="mystery_ticket", label="Mystery Ticket", info="Sail to an island nobody's mapped. Different every time.", act=dict(t="purchase", shop="tomas", item="mystery_ticket"),
+                         ok=self.unlocked("harbor") and self.coins >= 500, right="500g" if self.unlocked("harbor") else "after the Harbor project")]
+            return self.list_menu(p, "fishshop", "Old Tomas's Fish Shop", rows, sub=hi)
+        if loc == "bank":
+            n = self.count(p, "gold_nugget")
+            rows = [dict(key="gold_nugget", label="Exchange gold nuggets", info="Mr. Penny pays 220g a nugget (the shipping bin pays 150g).", act=dict(t="exchange"), ok=n > 0, right="x%d" % n)]
+            return self.list_menu(p, "bank", "Bank of Dusty Gulch", rows, sub=hi)
+        if loc == "post":
+            return self.say(p, "%s hands you a letter. %s" % (keeper, random.choice(MAIL)), "event")
+        if loc == "cabin":
+            self.say(p, hi)
+            return self.shop_menu(p, "ranger")
+        return self.say(p, hi)
+
+    def mercantile(self, p, rows):
+        from valley.crafting import SHOPS
+        title, keeper, stock = SHOPS["mercantile"]
+        for key, price in stock:
+            rows.append(dict(key=key, label=ITEMS[key]["name"], info=self.item_info(key), right="%dg" % price, act=dict(t="purchase", shop="mercantile", item=key), ok=self.coins >= price))
+        self.list_menu(p, "shop:mercantile", "Mercantile", rows, sub="Bram · %dg shared" % self.coins, keep=True)
+
+    def act_shop_open(self, p, msg, now):
+        if p.get("loc") == "store":
+            self.act_shop(p, {}, now)
+
+    def act_forge(self, p, msg, now):
+        key = msg.get("item")
+        cost = {"sword_copper": ("copper_ore", 100), "sword_iron": ("iron_ore", 300), "sword_gold": ("gold_ore", 800), "coal": (None, 20)}.get(key)
+        if not cost or p.get("loc") != "smith":
+            return
+        ore, coins = cost
+        if self.coins < coins or (ore and self.count(p, ore) < 6):
+            return self.say(p, "Ingrid: You're a bit short on that.", "warn")
+        if ore:
+            self.take(p, ore, 6)
+        self.coins -= coins
+        self.give(p, key, 1)
+        self.say(p, "Ingrid hands you a %s%s." % (ITEMS[key]["name"], ", still warm" if ore else ""), "good")
+        self.keeper_counter(p, "smith", "Ingrid", now)
+
+    def act_exchange(self, p, msg, now):
+        n = self.count(p, "gold_nugget")
+        if p.get("loc") != "bank" or not n:
+            return
+        self.take(p, "gold_nugget", n)
+        self.coins += 220 * n
+        self.bump(p, "earned", 220 * n)
+        self.say(p, "Mr. Penny counts out %dg for your %d nugget%s." % (220 * n, n, "s" if n > 1 else ""), "good")
+        self.out.append((p["name"], dict(t="open", menu="close")))
+
     def interact_area(self, p, loc, fx, fy, now):
         ch = self.terrain(fx, fy, loc)
-        tiles = self.atiles[loc]
+        tiles = self.atiles.setdefault(loc, {})
         sel = self.selected_item(p)
         for pos in ((fx, fy), (p["x"], p["y"])):
             tl = tiles.get(pos)
@@ -1588,9 +1870,11 @@ class World:
         if ch == "m":
             return self.say(p, "Not your mailbox! You resist the urge to peek.")
         if ch == "@":
-            for b in AR.BUILDINGS[loc]:
+            for b in self.buildings_in(loc):
                 if b["x"] <= fx < b["x"] + b["w"] and b["y"] <= fy < b["y"] + b["h"]:
-                    if (fx, fy) == b["door"] and not b["to"]:
+                    if b["kind"] == "stable":
+                        return self.stable_menu(p, now)
+                    if tuple(b["door"]) == (fx, fy) and not b.get("to"):
                         who = b.get("keeper")
                         if who == "the horses":
                             return self.say(p, "The stable doors are shut. Somewhere inside, a horse whinnies.")
@@ -1615,6 +1899,8 @@ class World:
             return self.say(p, {"T": "A big old tree.", "P": "A tall pine. It smells of resin.", "A": "A palm tree. Coconuts drop now and then."}[ch])
         if ch in "UD":
             return self.say(p, "A ladder. Walk onto it to climb.")
+        if sel and ITEMS[sel]["kind"] == "food":
+            return self.act_eat(p, {}, now)
         return self.say(p, "Nothing to do here. Forage, fish, or explore!")
 
     def pick_area_forage(self, p, loc, pos, tl, now):
@@ -1647,7 +1933,7 @@ class World:
         if kind in GEMS:
             self.bump(p, "gems")
             self.event("%s found %s %s in %s!" % (p["name"], "an" if kind[0] in "aeiou" else "a", ITEMS[kind]["name"],
-                                                  AR.AREA_NAMES[loc]), now, "good")
+                                                  self.place_name(loc)), now, "good")
         else:
             self.say(p, "Broke the rock: " + ", ".join("%d %s" % (n, ITEMS[k]["name"]) for k, n in got) + ".", "good")
         self.check_milestones(now)
@@ -1927,6 +2213,9 @@ class World:
         price = dict((k, v) for k, v in self.shop_stock(now)).get(item)
         if price is None:
             return self.say(p, "The shop doesn't sell that right now.", "warn")
+        if item == "chicken":
+            self.buy_chicken(p, now)
+            return self.act_shop(p, msg, now)
         if item == "cow":
             n = 1
         cost = price * n
@@ -1968,11 +2257,13 @@ class World:
         self.bump(p, "earned", earned)
         self.say(p, "Sold %d %s for %dg." % (n, ITEMS[item]["name"], earned), "good")
         self.check_milestones(now)
+        if str(msg.get("menu", "")) in crafting.SHOPS:
+            self.shop_menu(p, msg["menu"])
 
     def act_sell_all(self, p, msg, now):
         total = 0
         for key, n in list(p["inventory"]):
-            if ITEMS[key]["kind"] in ("crop", "fruit", "forage", "fish", "material", "mineral"):
+            if ITEMS[key]["kind"] not in ("gear", "tool", "seed", "sapling", "machine", "machine_kit", "key", "weapon", "ammo", "treat", "ticket", "present", "food", "art") and ITEMS[key]["sell"] > 0:
                 self.take(p, key, n)
                 total += ITEMS[key]["sell"] * n
         if total <= 0:
@@ -1997,6 +2288,8 @@ class World:
         self.bump(p, "earned", q["reward"])
         self.event("%s delivered %d %s to %s and earned %dg!" %
                    (p["name"], q["n"], ITEMS[q["item"]]["name"], q["who"], q["reward"]), now, "good")
+        if q["who"] in getattr(self, "folk", {}):
+            self.befriend(p, q["who"], 80)
         self.new_quest(now)
         self.out.append((p["name"], dict(t="open", menu="board", quest=self.quest)))
         self.check_milestones(now)
@@ -2015,7 +2308,7 @@ class World:
     # fishing -------------------------------------------------------------------
     def act_fish_start(self, p, msg, now):
         loc = p.get("loc", "farm")
-        if loc not in OUTDOOR:
+        if not self.is_outdoor(loc):
             return self.say(p, "There's no water in here.")
         if p.get("carry"):
             return self.say(p, "Your arms are full - set the chest down first (E).", "warn")
@@ -2023,7 +2316,7 @@ class World:
         if self.terrain(fx, fy, loc) != "~":
             return self.say(p, "Face the water to fish.", "warn")
         raining = self.weather_at(now) != "sun"
-        keys = FARM_FISH if loc == "farm" else AR.AREA_FISH.get(loc, FARM_FISH)
+        keys = FARM_FISH if loc == "farm" else (self.fish_pool(loc) or FARM_FISH)
         weights = []
         for k in keys:
             w = FISH[k]["weight"]
@@ -2052,6 +2345,7 @@ class World:
             p["xp"] += 2
             return self.say(p, "You fished up... %s%s. Huh." % ("an " if key[0] in "aeiou" else "a ", fish["name"]))
         p["xp"] += 5 * fish["difficulty"] + 5
+        self.derby_catch(p, key)
         if key == "gold_nugget":
             self.event("%s panned a Gold Nugget out of the creek! Eureka!" % p["name"], now, "good")
             return self.check_milestones(now)
@@ -2137,9 +2431,16 @@ class World:
             p["color"] = PLAYER_COLORS.index(want)
             self.dirty = True
             return self.say(p, "New %s shirt. Looking good!" % want, "good")
+        if cmd == "/petname":
+            name = "".join(ch for ch in " ".join(parts[1:]) if ch.isalnum() or ch in " -'")[:16].strip()
+            if not p.get("pet") or not name:
+                return self.say(p, "Usage: /petname <name> (adopt a pet at the clinic first)")
+            p["pet"]["name"] = name
+            self.dirty = True
+            return self.say(p, "Your %s is called %s now." % (p["pet"]["kind"], name), "good")
         if cmd == "/me":
             action = " ".join(parts[1:])
             return self.event("* %s %s" % (p["name"], action), now, "chat")
         if cmd == "/help":
-            return self.say(p, "Commands: /ping@all [msg], /look boy|girl, /hat on|off, /color <shirt>, /farm <name>, /give <player> <item> [n], /me <action>")
+            return self.say(p, "Commands: /ping@all [msg], /look boy|girl, /hat on|off, /color <shirt>, /farm <name>, /give <player> <item> [n], /me <action>, /petname <name>")
         self.say(p, "Unknown command %s. Try /help." % cmd, "warn")
