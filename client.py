@@ -1010,8 +1010,13 @@ class Client:
 
     # ------------------------------------------------------------------ the valley map (N, once Father TongTong gave you one)
     def keys_map(self, key):
-        if key in ("ESC", "q", "n", "N", "ENTER", " "):
+        """The map stays up while you walk; N, q or Esc puts it away. Anything else is played as usual."""
+        if key in ("ESC", "q", "n", "N"):
             self.mode = "play"
+        else:
+            self.keys_play(key)
+            if self.mode == "play":
+                self.mode = "map"
 
     def map_spot(self, loc, x, y):
         if loc in MAP_LAYOUT:
@@ -1078,7 +1083,7 @@ class Client:
             text = "%s %s%s - %s" % ("@" if p["name"] == self.name else p["name"][0].upper(), p["name"], " (you)" if p["name"] == self.name else "",
                                      self.place_name(p.get("loc", "farm")))
             self.put(ly0 + i // 2, x + 2 + (i % 2) * (bw // 2), text[:bw // 2 - 3], P(col) | B)
-        self.put(y + bh - 2, x + 2, "Everyone's live position. N or Esc closes.", curses.A_DIM)
+        self.put(y + bh - 2, x + 2, "Everyone's live position - keep walking with it open. N or Esc puts it away.", curses.A_DIM)
 
     # ------------------------------------------------------------------ festival minigames, terminal style
     def start_minigame(self, game, seed):
@@ -1932,7 +1937,7 @@ class Client:
             self.put(y, x0 + 16, "%d/%d" % (water, W.CAN_CAPACITY))
             y += 1
             nxt = me.get("next_xp")
-            top = me["level"] >= len(W.TITLES) - 1 or nxt is None or me["xp"] >= nxt   # top title: nothing left to fill
+            top = me["level"] >= W.MAX_LEVEL or nxt is None or me["xp"] >= nxt   # level 1000: nothing left to fill
             self.put(y, x0 + 1, "Lv%d %s  xp %s" % (me["level"], me["title"], "MAX" if top else "%d/%d" % (me["xp"], nxt)), curses.A_DIM)
             y += 2
         q = st.get("quest")

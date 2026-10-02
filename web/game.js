@@ -363,7 +363,7 @@ function updateHud() {
   $("#online").textContent = st.players.filter((p) => p.online).length + " online";
   if (me) {   // the little green farming xp bar under the tool bar
     const lo = 60 * me.level * me.level, hi = me.next_xp;
-    const max = me.level >= (catalog.titles ? catalog.titles.length - 1 : Infinity) || hi == null || hi <= lo || me.xp >= hi;   // top title: nothing left to fill
+    const max = me.level >= (catalog.max_level || 1000) || hi == null || hi <= lo || me.xp >= hi;   // level 1000: nothing left to fill
     const pct = max ? 1 : Math.max(0, Math.min(1, (me.xp - lo) / (hi - lo)));
     const bar = $("#xpbar");
     bar.querySelector(".fill").style.width = (pct * 100).toFixed(1) + "%";
@@ -507,7 +507,7 @@ function menuSig(k) {
   if (k === "board") return JSON.stringify([state.quest, inv]);
   if (k === "bag") return JSON.stringify([inv, me && me.selected]);
   if (k === "list" || k === "mg") return null;
-  if (k === "map") return JSON.stringify(state.players.filter((q) => q.online).map((q) => [q.name, q.loc])); 
+
   if (k === "barn") { const mp = myPlayer(); return JSON.stringify([state.storage, inv, !!(mp && (mp.loc || "farm") === "farm" && chestAt(mp.x + mp.facing[0], mp.y + mp.facing[1]))]); }
   return null;
 }
@@ -538,7 +538,6 @@ function renderMenu(fresh) {
   const box = $("#menu"), h2 = box.querySelector("h2"), body = box.querySelector(".body"), foot = box.querySelector(".foot");
   const bank0 = body.querySelector(".rs-bank"), keep = fresh ? 0 : body.scrollTop, keepBank = fresh || !bank0 ? 0 : bank0.scrollTop;
   box.querySelector(".box").classList.toggle("rs", menu.kind === "barn");   // the chest window wears the old-school bank look
-  box.querySelector(".box").classList.toggle("wide", menu.kind === "map");
   body.innerHTML = ""; foot.textContent = "Esc closes";
   const k = menu.kind, d = menu.data;
   if (k === "shop") {
@@ -673,7 +672,6 @@ function renderMenu(fresh) {
       row.appendChild(el("div", "blurb", blurb(key))); row.style.flexWrap = "wrap"; body.appendChild(row);
     });
     foot.textContent = "Click something to hold it. Esc closes.";
-  } else if (k === "map") { renderMap(h2, body, foot);
   } else if (k === "help") {
     h2.textContent = "How to farm";
     body.innerHTML = "<p><kbd>WASD</kbd> or arrows to walk. You act on the tile you stand on; the pond, shop, bin, board, well, mailbox and trees are used by facing them (they glow).</p>" +
@@ -758,7 +756,7 @@ window.addEventListener("keydown", (e) => {
   if (mode === "minigame") { mgKey(e); return; }
   if (mode === "menu" && menu && menu.kind === "list" && e.key !== "Escape") { listKeys(e); return; }
   if (mode === "menu") {
-    if (e.key === "Escape" || e.key === "i" || e.key === "I" || (menu && menu.kind === "help" && (e.key === "?" || e.key === "h" || e.key === "H")) || (menu && menu.kind === "journal" && (e.key === "j" || e.key === "J")) || (menu && menu.kind === "map" && (e.key === "n" || e.key === "N"))) { if (menu && menu.kind === "proposal") send({ t: "propose_answer", yes: false }); closeMenu(); }
+    if (e.key === "Escape" || e.key === "i" || e.key === "I" || (menu && menu.kind === "help" && (e.key === "?" || e.key === "h" || e.key === "H")) || (menu && menu.kind === "journal" && (e.key === "j" || e.key === "J"))) { if (menu && menu.kind === "proposal") send({ t: "propose_answer", yes: false }); closeMenu(); }
     if (menu && menu.kind === "shop") {
       if (e.key === "ArrowDown") { menu.cursor = (menu.cursor + 1) % menu.data.stock.length; renderMenu(); e.preventDefault(); }
       if (e.key === "ArrowUp") { menu.cursor = (menu.cursor - 1 + menu.data.stock.length) % menu.data.stock.length; renderMenu(); e.preventDefault(); }
@@ -769,6 +767,7 @@ window.addEventListener("keydown", (e) => {
     if (menu && menu.kind === "board" && e.key === "Enter") send({ t: "deliver" });
     return;
   }
+  if (e.key === "Escape" && mapOpen) { closeMap(); return; }
   if (DIRS[e.key]) { const dir = DIRS[e.key]; held.add(dir); lastDir = dir; if (!e.repeat && !tryStep(dir, performance.now())) my.queued = dir; e.preventDefault(); }
   else if (e.key === "e" || e.key === "E" || e.key === " " || e.key === "Enter") {
     const tool = heldItem(), mp = myPlayer();
@@ -1860,67 +1859,71 @@ function placeName(loc) {
   return room + (spot && spot[0] !== "farm" ? ", " + ((catalog.area_names || {})[spot[0]] || spot[0]) : spot ? ", the farm" : "");
 }
 function drawValleyMap(cv, now) {
-  const g = cv.getContext("2d"), P = MAP_PX;
-  cv.width = MAP_W * P; cv.height = MAP_H * P;
-  g.fillStyle = "#2e4a5a"; g.fillRect(0, 0, cv.width, cv.height);
-  for (let i = 0; i < 260; i++) { g.fillStyle = "rgba(255,255,255,.05)"; g.fillRect((i * 97) % cv.width, (i * 53) % cv.height, 6, 1); }   // a sea of little waves
-  g.imageSmoothingEnabled = false; g.textBaseline = "bottom"; g.font = "bold 11px 'Pixelify Sans', sans-serif";
+  const dpr = window.devicePixelRatio || 1, cssW = cv.clientWidth || 400, P = cssW * dpr / MAP_W, k = dpr;
+  const W = Math.round(MAP_W * P), H = Math.round(MAP_H * P);
+  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  const g = cv.getContext("2d");
+  g.fillStyle = "#2e4a5a"; g.fillRect(0, 0, W, H);
+  for (let i = 0; i < 200; i++) { g.fillStyle = "rgba(255,255,255,.05)"; g.fillRect((i * 97) % W, (i * 53) % H, 5 * k, k); }   // a sea of little waves
+  g.imageSmoothingEnabled = false; g.textBaseline = "bottom";
   for (const loc in MAP_LAYOUT) {
     const rows = mapRows(loc); if (!rows.length) continue;
-    const [lx, ly] = MAP_LAYOUT[loc], x0 = lx * P, y0 = ly * P, w = rows[0].length * P, h = rows.length * P;
-    g.fillStyle = "rgba(0,0,0,.35)"; g.fillRect(x0 + 3, y0 + 3, w, h);
-    g.drawImage(mapAreaImage(loc), x0, y0);
-    g.strokeStyle = "#2b1f17"; g.lineWidth = 2; g.strokeRect(x0 - 1, y0 - 1, w + 2, h + 2);
+    const [lx, ly] = MAP_LAYOUT[loc], x0 = Math.round(lx * P), y0 = Math.round(ly * P), w = Math.round(rows[0].length * P), h = Math.round(rows.length * P);
+    g.fillStyle = "rgba(0,0,0,.35)"; g.fillRect(x0 + 2 * k, y0 + 2 * k, w, h);
+    g.drawImage(mapAreaImage(loc), x0, y0, w, h);
+    g.strokeStyle = "#2b1f17"; g.lineWidth = 1.5 * k; g.strokeRect(x0, y0, w, h);
+    g.font = "bold " + Math.round(9 * k) + "px 'Pixelify Sans', sans-serif";
     const label = loc === "farm" ? farmName : (catalog.area_names[loc] || loc).replace(/^the /, "").replace(/^./, (c) => c.toUpperCase());
     const tw = g.measureText(label).width;
-    g.fillStyle = "rgba(43,31,23,.8)"; g.fillRect(x0 + 4, y0 + 3, tw + 8, 14);
-    g.fillStyle = "#f6ead0"; g.fillText(label, x0 + 8, y0 + 16);
+    g.fillStyle = "rgba(43,31,23,.78)"; g.fillRect(x0 + 2 * k, y0 + 2 * k, tw + 6 * k, 11 * k);
+    g.fillStyle = "#f6ead0"; g.fillText(label, x0 + 5 * k, y0 + 12 * k);
   }
-  // everyone online: a dot in their shirt colour, a name tag; you get a gently pulsing ring
-  const dots = [];
+  // everyone online: a dot in their shirt colour and a name tag (gliding with them); you get a gently pulsing ring
   for (const p of state.players) {
     if (!p.online) continue;
-    const s = mapSpot(p.loc || "farm", p.x, p.y); if (!s) continue;
-    const L = MAP_LAYOUT[s[0]]; if (!L) continue;
-    dots.push({ p, x: (L[0] + s[1]) * P + P / 2, y: (L[1] + s[2]) * P + P / 2 });
-  }
-  for (const d of dots) {
-    const col = COLORS[catalog.player_colors[d.p.color % catalog.player_colors.length]] || "#fff", mine = d.p.name === prefs.name;
-    if (mine) { const r = 9 + Math.sin(now / 250) * 2; g.strokeStyle = "#fffaf0"; g.lineWidth = 2; g.beginPath(); g.arc(d.x, d.y, r, 0, 6.3); g.stroke(); }
-    g.fillStyle = "#2b1f17"; g.beginPath(); g.arc(d.x, d.y, 6, 0, 6.3); g.fill();
-    g.fillStyle = col; g.beginPath(); g.arc(d.x, d.y, 4.5, 0, 6.3); g.fill();
-    g.font = "bold 10px 'Pixelify Sans', sans-serif";
-    const name = mine ? "You" : d.p.name, tw = g.measureText(name).width;
-    g.fillStyle = "rgba(43,31,23,.85)"; g.fillRect(d.x - tw / 2 - 4, d.y - 22, tw + 8, 13);
-    g.fillStyle = mine ? "#ffe066" : "#fffaf0"; g.textAlign = "center"; g.fillText(name, d.x, d.y - 10); g.textAlign = "left";
+    const loc = p.loc || "farm", s = mapSpot(loc, p.x, p.y); if (!s || !MAP_LAYOUT[s[0]]) continue;
+    const L = MAP_LAYOUT[s[0]], mine = p.name === prefs.name, outside = s[0] === loc;
+    const v = mine && my.ready && loc === my.loc ? my : viz[p.name] && viz[p.name].loc === loc ? viz[p.name] : null;
+    const bx = outside && v ? v.x : s[1], by = outside && v ? v.y : s[2];
+    const x = (L[0] + bx + 0.5) * P, y = (L[1] + by + 0.5) * P;
+    const col = COLORS[catalog.player_colors[p.color % catalog.player_colors.length]] || "#fff";
+    if (mine) { const r = (7 + Math.sin(now / 250) * 1.5) * k; g.strokeStyle = "#fffaf0"; g.lineWidth = 1.5 * k; g.beginPath(); g.arc(x, y, r, 0, 6.3); g.stroke(); }
+    g.fillStyle = "#2b1f17"; g.beginPath(); g.arc(x, y, 4.5 * k, 0, 6.3); g.fill();
+    g.fillStyle = col; g.beginPath(); g.arc(x, y, 3.3 * k, 0, 6.3); g.fill();
+    g.font = "bold " + Math.round(9 * k) + "px 'Pixelify Sans', sans-serif";
+    const name = mine ? "You" : p.name, tw = g.measureText(name).width;
+    g.fillStyle = "rgba(43,31,23,.85)"; g.fillRect(x - tw / 2 - 3 * k, y - 18 * k, tw + 6 * k, 11 * k);
+    g.fillStyle = mine ? "#ffe066" : "#fffaf0"; g.textAlign = "center"; g.fillText(name, x, y - 8 * k); g.textAlign = "left";
   }
 }
-let mapRaf = 0;
+let mapRaf = 0, mapOpen = false, mapListSig = "", mapDrawn = 0;
 function mapKick() { if (!mapRaf) mapRaf = requestAnimationFrame(mapFrame); }
 function mapFrame(now) {
   mapRaf = 0;
-  if (!menu || menu.kind !== "map") return;
-  const cv = document.querySelector("#menu .valley-map"); if (!cv || !state) return;
-  drawValleyMap(cv, now);
+  if (!mapOpen || !state) return;
+  if (now - mapDrawn > 60) {                                   // ~15 times a second is plenty for a map
+    mapDrawn = now;
+    drawValleyMap($("#mapPanel canvas"), now);
+    const sig = JSON.stringify(state.players.filter((q) => q.online).map((q) => [q.name, q.loc]));
+    if (sig !== mapListSig) { mapListSig = sig; fillMapList($("#mapPanel .map-list")); }
+  }
   mapKick();
 }
-function renderMap(h2, body, foot) {
-  h2.textContent = "Valley Map";
-  const cv = document.createElement("canvas"); cv.className = "valley-map"; body.appendChild(cv);
-  const list = el("div", "map-list");
+function fillMapList(list) {
+  list.innerHTML = "";
   for (const p of state.players.filter((q) => q.online).sort((a, b) => (a.name === prefs.name ? -1 : b.name === prefs.name ? 1 : a.name.localeCompare(b.name)))) {
     const row = el("div", "map-who"); const sw = el("span", "sw"); sw.style.background = COLORS[catalog.player_colors[p.color % catalog.player_colors.length]];
     row.appendChild(sw); row.appendChild(el("b", null, p.name === prefs.name ? p.name + " (you)" : p.name)); row.appendChild(el("span", null, " - " + placeName(p.loc || "farm")));
     list.appendChild(row);
   }
-  body.appendChild(list);
-  foot.textContent = "Everyone's live position. N or Esc closes.";
-  mapKick();
 }
 function openMap() {
+  /* N: the map docks in the corner and stays up while you walk; N again (or its x) puts it away */
+  if (mapOpen) { closeMap(); return; }
   if (!(me && me.inventory.some(([k]) => k === "valley_map"))) { toast("You don't have a map yet - Father TongTong (by the chapel on the farm) has one for you.", "info"); return; }
-  openMenu("map", {});
+  mapOpen = true; mapListSig = ""; mapDrawn = 0; $("#mapPanel").classList.remove("hidden"); mapKick();
 }
+function closeMap() { mapOpen = false; $("#mapPanel").classList.add("hidden"); canvas.focus(); }
 let _ox = 0, _oy = 0;
 function drawBubble(x, y, text) {
   ctx.font = "bold " + 4.5 * SCALE + "px 'Trebuchet MS', sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -1948,6 +1951,7 @@ function drawTag(x, y, text) {
 }
 
 $("#wish").onclick = () => { wish(); canvas.focus(); };
+$("#mapPanel .xbtn").onclick = () => closeMap();
 $("#menu .xbtn").onclick = () => { if (mode === "fish") endFishing(false); else if (menu && menu.kind === "proposal") { send({ t: "propose_answer", yes: false }); closeMenu(); } else closeMenu(); };
 setupLogin();
 requestAnimationFrame(render);

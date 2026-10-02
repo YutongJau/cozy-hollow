@@ -93,8 +93,14 @@ PLAYER_COLORS = ["cyan", "magenta", "yellow", "green", "red", "blue", "white", "
 SPRITES = ["boy", "girl"]
 OWN_LOOKS = ["claude"]
 SKY_SHIFT = float(os.environ.get("COZY_SKY_SHIFT", "0") or 0)    # testing only: move the sky clock (seconds) on a throwaway server       # farmers with a look of their own, drawn by the browser's art (Claude, the AI farmer)
-TITLES = ["Sprout", "Seedling", "Grower", "Green Thumb", "Harvest Hand",
-          "Farm Boss", "Valley Legend"]
+MAX_LEVEL = 1000
+# a title for each stretch of levels (the first seven are the original ones, so nobody's title changes)
+LEVEL_TITLES = [(0, "Sprout"), (1, "Seedling"), (2, "Grower"), (3, "Green Thumb"), (4, "Harvest Hand"), (5, "Farm Boss"),
+                (6, "Valley Legend"), (10, "Master Farmer"), (15, "Orchard Sage"), (25, "Harvest Hero"), (40, "Grand Grower"),
+                (60, "Seasoned Steward"), (85, "Valley Elder"), (120, "Hollow Hero"), (170, "Golden Hands"), (250, "Living Legend"),
+                (350, "Myth of the Fields"), (500, "Keeper of Seasons"), (700, "Eternal Harvester"), (900, "Spirit of the Valley"),
+                (1000, "Cozy Hollow Immortal")]
+TITLES = [t for _, t in LEVEL_TITLES]
 
 NPCS = ["Mayor Hazel", "Old Tomas", "Auntie Marigold", "Pip the courier",
         "Juniper the baker", "Doc Alder", "Wren from the lighthouse"]
@@ -466,7 +472,12 @@ def neighbors8(pos):
 
 
 def level_for(xp):
-    return min(len(TITLES) - 1, int((max(0, xp) / 60.0) ** 0.5))
+    """Level from experience: level L needs 60 * L * L xp (the same curve as always), up to level 1000."""
+    return min(MAX_LEVEL, int((max(0, xp) / 60.0) ** 0.5))
+
+
+def title_for(level):
+    return [t for lv, t in LEVEL_TITLES if level >= lv][-1]
 
 
 def fmt_duration(sec):
@@ -507,7 +518,7 @@ def catalog():
         forage={k: dict(name=f["name"], color=f["color"], sell=f["sell"]) for k, f in FORAGE.items()},
         fish={k: dict(name=f["name"], sell=f["sell"], difficulty=f["difficulty"], junk=f["junk"])
               for k, f in FISH.items()},
-        player_colors=PLAYER_COLORS, sprites=SPRITES, titles=TITLES,
+        player_colors=PLAYER_COLORS, sprites=SPRITES, titles=TITLES, max_level=MAX_LEVEL,
         water_mult=WATER_MULT, water_duration=WATER_DURATION, can=CAN_CAPACITY,
         terrain_names=TERRAIN_NAMES, map_w=MAP_W, map_h=MAP_H, pasture=PASTURE, cow_price=COW_PRICE, max_cows=MAX_COWS,
         fields=FIELDS, priest=PRIEST, altar=ALTAR, interiors=INTERIORS, interior_names=INTERIOR_NAMES, doors=DOORS,
@@ -1416,16 +1427,16 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
                     carry=p.get("carry"), spouse=self.spouse_of(p["name"]), loc=p.get("loc", "farm"),
                     color=p["color"], sprite=p.get("sprite", "boy"), online=bool(p.get("online")),
                     bubble=bubble[0] if bubble else None,
-                    level=level_for(p["xp"]), title=TITLES[level_for(p["xp"])],
+                    level=level_for(p["xp"]), title=title_for(level_for(p["xp"])),
                     fishing=bool(p.get("fishing")))
         self._run("pub", p, d, now)
         return d
 
     def private_player(self, p):
         lvl = level_for(p["xp"])
-        nxt = 60 * (lvl + 1) ** 2
+        nxt = 60 * (lvl + 1) ** 2 if lvl < MAX_LEVEL else None
         d = dict(inventory=p["inventory"], selected=p["selected"], loc=p.get("loc", "farm"),
-                 water=p["water"], xp=p["xp"], level=lvl, title=TITLES[lvl],
+                 water=p["water"], xp=p["xp"], level=lvl, title=title_for(lvl),
                  next_xp=nxt, stats=p.get("stats", {}), hp=p.get("hp", MAX_HP), max_hp=MAX_HP)
         self._run("priv", p, d)
         return d
@@ -2156,7 +2167,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         self.fx(p, "lift", crop["kind"], pos)
         lo, hi = c["yield_"]
         n = random.randint(lo, hi)
-        if random.random() < 0.03 * level_for(p["xp"]):
+        if random.random() < min(0.6, 0.03 * level_for(p["xp"])):           # a bonus crop now and then, more often as you level
             n += 1
         self.give(p, crop["kind"], n)
         p["xp"] += 8 + c["sell"] // 4
@@ -2306,7 +2317,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         players = []
         for q in self.players.values():
             players.append(dict(name=q["name"], online=bool(q.get("online")),
-                                level=level_for(q["xp"]), title=TITLES[level_for(q["xp"])],
+                                level=level_for(q["xp"]), title=title_for(level_for(q["xp"])),
                                 stats=q.get("stats", {}), last_seen=q.get("last_seen", 0)))
         self.out.append((p["name"], dict(
             t="open", menu="journal", farm=self.name, created=self.created,
