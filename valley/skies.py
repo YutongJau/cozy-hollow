@@ -20,7 +20,9 @@ ISLAND_KINDS = [("orchard", "Orchard Isle"), ("rocky", "Rocky Isle"), ("bugs", "
 class Skies:
     def _init_sky(self, now):
         self.star = None              # {id, t0} while a shooting star is crossing the sky
-        self.star_next = now + random.uniform(40, 90)
+        forced = W.os.environ.get("COZY_STAR_IN")    # the host can ask for a star: COZY_STAR_IN=<seconds> when starting the server
+        self.star_next = now + (float(forced) if forced else random.uniform(40, 90))
+        self.star_forced = bool(forced)
         self.wishes = getattr(self, "wishes", 0)
         self.balloon = None           # {loc, x, y, vx, t0, id}
         self.balloon_next = now + random.uniform(120, 240)
@@ -49,8 +51,12 @@ class Skies:
         if self.star and now - self.star["t0"] > 3.5:
             self.star = None
         if not self.star and now >= self.star_next:
+            if self.star_forced and not outdoors:
+                self.star_next = now + 2                  # the host's star waits until someone is outside to see it
+                return
             self.star_next = now + random.uniform(35, 110)
-            if outdoors and (h >= 20.5 or h < 4.5) and self.weather_at(now) == "sun":
+            if outdoors and (self.star_forced or ((h >= 20.5 or h < 4.5) and self.weather_at(now) == "sun")):
+                self.star_forced = False
                 self.star = dict(id=random.randint(1, 10 ** 9), t0=now, x=random.random(), y=random.uniform(0.05, 0.35), dx=random.choice((-1, 1)))
                 self.out.append(("all", dict(t="star", id=self.star["id"], x=self.star["x"], y=self.star["y"], dx=self.star["dx"])))
         # a present drifting by on a balloon, over wherever somebody is
