@@ -256,7 +256,8 @@ class Revival:
             rows.append(dict(section="What %s brings" % STAGES[nxt]))
             rows.append(dict(label="Coming to the valley", info=BRINGS[nxt], ok=False))
         else:
-            rows.append(dict(label="Cozy Hollow is In Bloom. Thank you, every one of you.", ok=False))
+            rows.append(dict(label="Cozy Hollow is In Bloom. Thank you, every one of you.", info="Read the credits, or visit the monument in the south plaza.",
+                             act=dict(t="credits"), ok=True, right="Credits"))
         rows.append(dict(section="Shipped so far"))
         shipped = self.revival["shipped"]
         rows.append(dict(label="%d of %d kinds of crop" % (len(shipped), len(W.CROPS)),

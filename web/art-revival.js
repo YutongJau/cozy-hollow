@@ -152,6 +152,34 @@ function hotSpringSprite(frame) {
   });
 }
 
+// ------------------------------------------------------------------ the Bloom monument
+function monumentSprite() {
+  /* a stepped stone plinth with a bronze plaque, a golden sprout on top (two broad leaves and a bud) and a ring of flowers
+     at its foot; 48x72, standing on one tile (the plinth's foot is the bottom 16 rows) */
+  return cached("rv:monument", 48, 72, (g, c) => {
+    const st = { deep: "#5f5a52", dark: "#837d73", mid: "#a49d91", light: "#c3bcaf", hi: "#ddd7cb" };
+    const gold = { dark: "#b08a20", mid: "#f2c744", light: "#fff2a8" };
+    ell(g, 24, 66, 21, 5, "rgba(40,50,30,0.3)");
+    px(g, 5, 56, 38, 8, st.dark); px(g, 5, 56, 38, 2, st.light); px(g, 5, 62, 38, 2, st.deep);
+    px(g, 9, 50, 30, 7, st.mid); px(g, 9, 50, 30, 1, st.hi); px(g, 9, 56, 30, 1, st.dark);
+    px(g, 13, 26, 22, 25, st.mid); px(g, 13, 26, 3, 25, st.light); px(g, 32, 26, 3, 25, st.dark); px(g, 11, 24, 26, 3, st.light); px(g, 11, 24, 26, 1, st.hi); px(g, 11, 26, 26, 1, st.dark);
+    px(g, 13, 33, 22, 11, "#8a5a2a"); px(g, 14, 34, 20, 9, "#b0763a"); px(g, 14, 34, 20, 1, "#d09a5a");
+    ART.text3x5(g, 15, 36, "BLOOM", "#5a3a1a", 1);
+    px(g, 23, 11, 3, 14, gold.dark); px(g, 23, 11, 1, 14, gold.mid);
+    const leaf = (x0, y0, x1, y1, w) => {          // a pointed leaf from (x0,y0) to (x1,y1), widest in the middle
+      for (let k = 0; k <= 24; k++) {
+        const t = k / 24, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t, hw = Math.sin(Math.PI * t) * w;
+        for (let d = -hw; d <= hw; d += 0.5) { const nx = Math.round(x - (y1 - y0) / 14 * d / w * 2), ny = Math.round(y + (x1 - x0) / 14 * d / w * 2); dot(g, nx, ny, d < -hw / 3 ? gold.light : d > hw / 2 ? gold.dark : gold.mid); }
+      }
+    };
+    leaf(23, 19, 11, 11, 3.2); leaf(26, 17, 38, 9, 3.2);
+    ell(g, 24, 8, 3, 4, gold.mid); px(g, 23, 5, 1, 3, gold.light); dot(g, 24, 3, gold.light); px(g, 25, 10, 2, 1, gold.dark);
+    const fl = ["#ff7eb6", "#ffe066", "#ffffff", "#c58aff", "#ff9c4a"];
+    for (let i = 0; i < 11; i++) { const x = 4 + i * 4, y = 64 + (i % 2) * 3; px(g, x, y + 1, 1, 3, "#3f8f3a"); px(g, x - 1, y - 1, 3, 3, fl[i % 5]); dot(g, x, y, "#f2a020"); }
+    outline(c, OUT);
+  });
+}
+
 // ------------------------------------------------------------------ paper lanterns for a Thriving town
 function lanternSprite(color, lit) {
   return cached("rv:lantern" + color + (lit ? 1 : 0), 12, 16, (g, c) => {
@@ -165,5 +193,21 @@ function lanternSprite(color, lit) {
   });
 }
 
-Object.assign(ART, { fountainDry, wiltedPlanter, weedSprite, boardsSprite, stallShut, springTile, hotSpringSprite, lanternSprite });
+// ------------------------------------------------------------------ icons for the things the Revival brings
+const ICONS = {
+  valley_medal: (g) => {   // a gold medal on a pink and green ribbon, a sprout stamped in the middle
+    px(g, 9, 2, 6, 12, "#e86a9a"); px(g, 17, 2, 6, 12, "#5fb04a"); px(g, 9, 2, 6, 1, "#ff9cc6"); px(g, 17, 2, 6, 1, "#8ed66a");
+    px(g, 13, 10, 6, 4, "#c9a640");
+    ell(g, 16, 20, 8, 8, "#b08a20"); ell(g, 16, 20, 7, 7, "#f2c744"); ell(g, 14, 18, 3, 3, "#fff2a8");
+    px(g, 16, 18, 1, 6, "#b08a20"); px(g, 13, 19, 3, 1, "#b08a20"); px(g, 17, 18, 3, 1, "#b08a20"); dot(g, 12, 18, "#b08a20"); dot(g, 20, 17, "#b08a20");
+  },
+};
+const prevIconR = ART.iconCanvas;
+ART.iconCanvas = function (key, cat) {
+  if (!ICONS[key]) return prevIconR(key, cat);
+  return cached("rv:icon:" + key, A, A, (g, c) => { ICONS[key](g); outline(c, OUT); });
+};
+ART.REVIVAL_ICONS = ICONS;
+
+Object.assign(ART, { fountainDry, wiltedPlanter, weedSprite, boardsSprite, stallShut, springTile, hotSpringSprite, monumentSprite, lanternSprite });
 })();

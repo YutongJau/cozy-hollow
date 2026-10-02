@@ -1021,6 +1021,7 @@ function renderFrame(now) {
     else if ("o$!fBchmlbwspg".includes(ch_)) { if (ch_ === "o" || ch_ === "l" || ch_ === "!" || ch_ === "g") ents.push({ y: y + 0.4, draw: () => ctx.drawImage(Art.propSprite(ch_), sx, sy, T, T) }); else ctx.drawImage(Art.propSprite(ch_), sx, sy, T, T); }
     else if (ch_ === "J" && town && rvs < 1) { const spr = Art.stallShut(); ents.push({ y: y + 0.4, draw: () => ctx.drawImage(spr, sx, sy, T, T) }); }
     else if ("ELIJOUD".includes(ch_)) { const spr = Art.areaProp(ch_, h); ents.push({ y: y + 0.4, draw: () => ctx.drawImage(spr, sx, sy, T, T) }); }
+    else if (ch_ === "M") ents.push({ y: y + 0.7, draw: () => { ctx.drawImage(Art.monumentSprite(), sx - 8 * SCALE, sy - 52 * SCALE, 48 * SCALE, 72 * SCALE); } });
     else if (ch_ === "j") {
       if (cell(x - 1, y) !== "j" && cell(x, y - 1) !== "j") ctx.drawImage(Art.hotSpringSprite(waterFrame), sx - 4 * SCALE, sy - 8 * SCALE, 136 * SCALE, 80 * SCALE);   // the whole pool, from its top-left tile
       ents.push({ y: y + 0.1, draw: () => steam(sx, sy, now, h) });
@@ -1113,7 +1114,7 @@ function renderFrame(now) {
   const meP = myPlayer();
   if (meP) {
     const fx = meP.x + meP.facing[0], fy = meP.y + meP.facing[1], ft = cell(fx, fy), fd = (farm ? tiles : ATL)[fx + "," + fy] || {};
-    const hot = farm ? ("S$!+~wmBchblNspg.:".includes(ft) || fd.t || fd.g || chestAt(fx, fy)) : ("~!wmIEFJLOgVQUDBchblj".includes(ft) || fd.g || fd.o || portals.has(loc + "," + fx + "," + fy));
+    const hot = farm ? ("S$!+~wmBchblNspg.:".includes(ft) || fd.t || fd.g || chestAt(fx, fy)) : ("~!wmIEFJLOgVQUDBchbljM".includes(ft) || fd.g || fd.o || portals.has(loc + "," + fx + "," + fy));
     if (hot) {
       ctx.strokeStyle = "rgba(255,250,200," + (0.35 + 0.3 * Math.sin(now / 200)) + ")"; ctx.lineWidth = SCALE;
       ctx.strokeRect(ox + fx * T + 2 * SCALE, oy + fy * T + 2 * SCALE, T - 4 * SCALE, T - 4 * SCALE);
@@ -1311,6 +1312,7 @@ function renderFrame(now) {
   if (now - hurtAt < 350) { ctx.fillStyle = "rgba(220,40,40," + (0.28 * (1 - (now - hurtAt) / 350)).toFixed(3) + ")"; ctx.fillRect(0, 0, cw, ch); }
   drawBanner(now, cw);
   drawCeremony(now, cw, ch, dt);
+  if (state.bloom && state.bloom.on && !cave && (night > 0.25 || (state.ceremony && state.ceremony.stage === 4))) fireworks(now, cw, ch, dt);
   if (Math.floor(now / 1000) !== Math.floor((now - dt * 1000) / 1000)) $("#clock").textContent = skyLabel(hourNow());
 }
 const _areaBld = {};
@@ -1651,6 +1653,32 @@ function lanternSpots(ox, oy, now) {
     }
   }
   return out;
+}
+let rockets = [], sparks = [], nextRocket = 0;
+function fireworks(now, cw, ch, dt) {
+  /* the Bloom Festival's fireworks: rockets climb from below, burst into rings of sparks that drift down and fade */
+  if (now > nextRocket) {
+    nextRocket = now + 350 + Math.random() * 900;
+    rockets.push({ x: cw * (0.15 + Math.random() * 0.7), y: ch, vy: -(ch * (0.55 + Math.random() * 0.25)), top: ch * (0.12 + Math.random() * 0.25), col: ["#ff7eb6", "#ffe066", "#7fd8e8", "#a8f07a", "#ffffff", "#ff9c4a"][Math.floor(Math.random() * 6)] });
+  }
+  ctx.save(); ctx.globalCompositeOperation = "lighter";
+  rockets = rockets.filter((r) => {
+    r.y += r.vy * dt; ctx.fillStyle = "#fff2c0"; ctx.fillRect(r.x - SCALE, r.y, 2 * SCALE, 4 * SCALE);
+    if (r.y > r.top) return true;
+    const n = 30 + Math.floor(Math.random() * 14), sp = (70 + Math.random() * 60) * SCALE / 2, col2 = ["#ff7eb6", "#ffe066", "#7fd8e8", "#a8f07a", "#ff9c4a"][Math.floor(Math.random() * 5)];
+    for (let i = 0; i < n; i++) { const a = (i / n) * 6.283; sparks.push({ x: r.x, y: r.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 1, col: r.col }); }
+    for (let i = 0; i < n / 2; i++) { const a = (i / (n / 2)) * 6.283 + 0.1; sparks.push({ x: r.x, y: r.y, vx: Math.cos(a) * sp * 0.5, vy: Math.sin(a) * sp * 0.5, life: 0.8, col: col2 }); }
+    return false;
+  });
+  sparks = sparks.filter((s) => {
+    s.x += s.vx * dt; s.y += s.vy * dt; s.vy += 40 * SCALE * dt; s.vx *= 0.985; s.life -= dt * 0.7;
+    if (s.life <= 0) return false;
+    const sz = (s.life > 0.6 ? 3 : 2) * SCALE;
+    ctx.globalAlpha = Math.max(0, s.life); ctx.fillStyle = s.col; ctx.fillRect(s.x, s.y, sz, sz);
+    ctx.globalAlpha = Math.max(0, s.life * 0.35); ctx.fillRect(s.x - s.vx * 0.04, s.y - s.vy * 0.04, SCALE, SCALE);
+    return true;
+  });
+  ctx.restore();
 }
 let cerPetals = [];
 function drawCeremony(now, cw, ch, dt) {

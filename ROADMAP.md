@@ -59,9 +59,14 @@ new neighbours, a shop reopening, decorations, a new area or activity, and a cer
 - Every stage-up: a banner and petals for everyone online, and Mayor Hazel speaks by the fountain while the townsfolk
   gather round. Tests: `python3 tests/test_bloom.py`.
 
-## Milestone 4 - The finale
+## Milestone 4 - The finale (done)
 Reaching In Bloom starts the Valley Bloom Festival: every villager in the square, fireworks, a monument with every
 farmer's name, credits listing what each person did, and rewards nobody can get any other way. Then the farm goes on.
+- The festival lasts one real day: everyone in the valley (even from the island and the gulch) gathers in the square
+  from 8am to 10pm, and fireworks go up every night. Everyone online sees the credits roll in.
+- The Bloom monument (a golden sprout on a stone plinth) stands in the south plaza; E reads every farmer's name.
+- Mayor Hazel gives each farmer the Bloom Crown and the Valley Medal (also later, for anyone who missed the day).
+- The valley's blessing: crops grow 10% faster from then on. Tests: `python3 tests/test_finale.py`.
 
 ## Milestone 5 - Coins that matter
 A rebalance from real data (an economy log of coins in and out by source), and things worth saving for: farm expansions,

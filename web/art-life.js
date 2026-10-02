@@ -303,6 +303,11 @@ const HATS = {
   champion: (g, back) => { px(g, 3, 9, 26, 2, "#f4ead2"); px(g, 9, 2, 14, 8, "#f4ead2"); px(g, 9, 2, 14, 2, "#ffffff"); px(g, 9, 7, 14, 2, "#c9a640"); if (!back) { px(g, 15, 3, 3, 3, "#f2c744"); dot(g, 16, 4, "#fff2a8"); } },
   witch: (g, back) => { for (let i = 0; i < 8; i++) px(g, 15 - Math.round(i * 0.8), i, 2 + Math.round(i * 1.6), 1, "#5a3a7a"); px(g, 5, 8, 22, 2, "#4a2a6a"); px(g, 9, 6, 14, 2, "#f28c28"); },
   santa: (g, back) => { px(g, 9, 3, 14, 5, "#d9463c"); px(g, 11, 1, 10, 2, "#d9463c"); px(g, 20, 0, 5, 3, "#d9463c"); px(g, 24, 2, 3, 3, "#f4f1ea"); px(g, 8, 7, 16, 3, "#f4f1ea"); },
+  bloom: (g, back) => {   // the Bloom Crown: a ring of everblooming flowers in pink, gold and white with leaves and a gold band
+    px(g, 8, 5, 16, 3, "#4f9e3b"); px(g, 8, 5, 16, 1, "#7ccf5a"); px(g, 9, 7, 14, 1, "#f2c744");
+    for (let i = 0; i < 6; i++) { const x = 8 + i * 3, y = 2 + (i % 2), c = ["#ff7eb6", "#ffe066", "#ffffff", "#ff9ccf", "#ffd25a", "#f4a0d8"][i]; px(g, x, y, 3, 3, c); dot(g, x + 1, y + 1, i % 3 === 1 ? "#e0802a" : "#f2c744"); dot(g, x + 1, y - 1, c); }
+    if (!back) { px(g, 14, 0, 4, 3, "#ff5a9a"); dot(g, 15, 1, "#ffe066"); dot(g, 16, 1, "#ffe066"); }
+  },
   crown: (g, back) => { px(g, 10, 4, 12, 4, "#f2c744"); for (let i = 0; i < 4; i++) px(g, 10 + i * 4, 1 + (i % 2), 2, 3, "#f2c744"); px(g, 10, 4, 12, 1, "#fff2a8"); for (const [x, c] of [[12, "#e0384f"], [15, "#5ab0f0"], [19, "#3cc070"]]) dot(g, x, 6, c); },
 };
 function hatSprite(kind, facing) {

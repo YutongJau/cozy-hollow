@@ -46,7 +46,7 @@ AREA_GLYPHS = {
     "V": ("\u2584", "v", 137, 25, "yellow", True), "Q": ("\u2584", "Q", 196, None, "red", True), "U": ("H", "H", 220, 236, "yellow", True),
     "D": ("\u25bc", "v", 220, 233, "yellow", True), "I": ("\u2248", "~", 45, 94, "cyan", True), "J": ("\u25a0", "J", 203, None, "red", True),
     "O": ("o", "o", 137, None, "yellow", True), "Z": ("\u25a0", "Z", 178, None, "yellow", True),
-    "j": ("\u2248", "~", 159, 30, "cyan", True),
+    "j": ("\u2248", "~", 159, 30, "cyan", True), "M": ("\u2655", "M", 220, None, "yellow", True),
 }
 # the folk and creatures of the valley: (unicode, ascii, 256-colour fg, 8-colour fg)
 NPC_GLYPH = ("\u263a", "@")

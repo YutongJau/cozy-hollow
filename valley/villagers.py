@@ -160,7 +160,7 @@ class Villagers:
         d = self.folk_def(name)
         h = self.sky_hour(now)
         rng = random.Random(sh(name) ^ int(now // W.SKY_DAY))
-        cer = self.ceremony_spot(name, now) if hasattr(self, "ceremony_spot") else None
+        cer = (self.bloom_spot(name, now) if hasattr(self, "bloom_spot") else None) or (self.ceremony_spot(name, now) if hasattr(self, "ceremony_spot") else None)
         if cer:
             return cer
         fest = self.festival_spot(name, now) if hasattr(self, "festival_spot") else None
