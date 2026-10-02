@@ -183,6 +183,7 @@ class Revival:
         if quiet:
             return
         self.event("The Valley Revival reached a new stage: %s! %s" % (STAGES[stage], BRINGS[stage]), now, "good")
+        self.scrap("The valley is %s! %s" % (STAGES[stage], BRINGS[stage].split(".")[0] + "."), now, "stage")
         self.stage_speech(stage, now)
 
     def stage_speech(self, stage, now):

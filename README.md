@@ -213,6 +213,32 @@ browser tabs reload by themselves.
 * **Reshaping the farm**: the landscaping shovel digs ponds and rivers and
   fills them back in; lay path stones and build bridges.
 
+### What you're working towards
+
+* **Levels and quests**: levels open new seeds, saplings, recipes and deeper
+  mine floors; fruit trees grow in the orchard's tree spots. Villagers ask
+  favors and have stories of their own (L is the quest log).
+* **The Valley Revival** is the farm's shared goal: five stages (Quiet,
+  Waking, Bustling, Thriving, In Bloom) across six threads (town projects,
+  the museum, friendships, festivals, crops shipped, exploration), with
+  everyone credited by name. The town changes with every stage: Fennel's
+  market, a flowing fountain, bunting and lanterns, Sol's hot spring. In
+  Bloom brings the Valley Bloom Festival, a monument with every farmer's
+  name, the credits, and gifts nobody can get any other way.
+* **Things worth saving for**: tool upgrades at Ingrid's, farm expansions, a
+  farmhouse kitchen and cellar, bigger coops and barns, Oakley's furniture,
+  the Minecart Line and the Observatory. `/ledger` shows the farm's books.
+* **Festivals** each have a hunt, Mayor Hazel's quiz and more; everyone's
+  points make the farm's score (Bronze, Silver, Gold) and the day's champion
+  wins that festival's hat.
+* **The Valley Pantry** (bundles at the Town Hall), **collections** of
+  everything ever found, and **achievements** with lasting rewards.
+* **A chapter every year**: Year One wakes the valley, Year Two relights the
+  lighthouse, Year Three builds a resort on Palm Isle, and then the Years of
+  Plenty. The **scrapbook** (J, or K) remembers the farm's firsts,
+  champions, records and big days.
+* K opens the **Valley Book** with all of it. The plan is in `ROADMAP.md`.
+
 ## Claude, the AI farmer
 
 ```bash
@@ -257,7 +283,10 @@ To play across two machines instead of one, run
 * `server.py` — the farm server (auto-started in the background)
 * `world.py` — items, crops, map, growth rules shared by both
 * `areas.py` — the town, forest, beach, mountain, mine, island and frontier maps, buildings and people
-* `valley/` — the living valley: villagers, festivals, animals, crafting, the museum, combat, the skies, landscaping, town projects
+* `valley/` — the living valley: villagers, festivals, animals, crafting, the museum, combat, the skies, landscaping, town projects,
+  levels and quests (`progress`, `quests`), the Valley Revival (`revival`, `bloom`, `finale`), the economy (`economy`), festival
+  activities (`fairground`), bundles, collections and achievements (`pantry`), yearly chapters and the scrapbook (`chapters`)
+* `tests/` — `python3 tests/test_<name>.py` checks each system against a real World, no server needed
 * `claudebot.py` — Claude, the AI farmer who plays as a regular player
 * `tools/` — render any sprite to a PNG without a browser (`node tools/render.js out.png 4 "petSprite('cat','down',0)"`)
 * `pingall.py` / `ping@all` — say hi on all of this account's terminals

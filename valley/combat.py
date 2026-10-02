@@ -130,6 +130,7 @@ class Combat:
                 self.bump(p, "depth_record")
                 if n % 5 == 0:
                     self.credit(p, "explore")
+                    self.farm_record("depth", n, now, "Record: %s reached floor %d of the Depths." % (p["name"], n))
                 if n % 5 == 0:
                     self.event("%s reached floor %d of the Depths!" % (p["name"], n), now, "good")
             if n % 5 == 0 and not any(m["kind"] == "slime_king" for m in self.mobs.get(loc, [])) and not self.mobs.get(loc + ":king"):

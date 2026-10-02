@@ -117,6 +117,8 @@ class Collections:
         if key in COLLECT and key not in self.collection:
             self.collection[key] = [p["name"], time.time()]
             self.dirty = True
+            it = W.ITEMS[key]
+            self.scrap_found(p, key, next((name for name, test in CATEGORIES if test(key, it)), None))
 
     def collections_menu(self, p, now):
         rows = []
@@ -199,6 +201,7 @@ class Collections:
             if all(b[0] in self.pantry["done"] for r, t, pk, bs in ROOMS if r == room for b in bs):
                 self.pantry["rooms"].append(room)
                 self.event("%s is complete! From now on: %s" % (rtitle, perk), now, "good")
+                self.scrap("%s in the Valley Pantry is complete." % rtitle, now, "pantry")
                 if len(self.pantry["rooms"]) == len(ROOMS):
                     self.coins += PANTRY_DONE_COINS
                     self.event("The Valley Pantry is full to the rafters! Mayor Hazel adds %dg to the purse." % PANTRY_DONE_COINS, now, "good")
@@ -260,6 +263,7 @@ class Collections:
                 else:
                     text = reward[0].lower() + reward[1:-1]
                 self.event("%s earned the achievement %s! (%s: %s)" % (p["name"], title, what, text), now, "good")
+                self.scrap("%s earned the achievement %s." % (p["name"], title), now, "achievement")
                 self.dirty = True
 
     def achievements_menu(self, p, now):

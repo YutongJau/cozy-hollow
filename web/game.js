@@ -611,6 +611,7 @@ function renderMenu(fresh) {
     d.all_milestones.forEach((m) => ms.appendChild(el("div", d.milestones.includes(m) ? "got" : "todo", (d.milestones.includes(m) ? "★ " : "☆ ") + m)));
     body.appendChild(ms);
     const fb = el("button", null, "Friends in the valley"); fb.onclick = () => send({ t: "friends" }); body.appendChild(fb);
+    const sb = el("button", null, "The scrapbook"); sb.style.marginLeft = "8px"; sb.onclick = () => send({ t: "scrapbook" }); body.appendChild(sb);
   } else if (k === "proposal") {
     h2.textContent = "Father TongTong";
     body.appendChild(el("p", null, "\u201cWell now. Shall I marry you and " + d.partner + "?\u201d"));
@@ -1267,6 +1268,18 @@ function renderFrame(now) {
       const d = tiles[k]; if (!d.m || !["lamp_post", "stone_lantern", "jack_o_lantern", "festive_tree"].includes(d.m[0])) continue;
       const [lx, ly] = k.split(",").map(Number); if (lx < x0 - 3 || lx > x1 + 3 || ly < y0 - 3 || ly > y1 + 3) continue;
       glow(ox + lx * T + T / 2, oy + ly * T + (d.m[0] === "lamp_post" ? 8 : 14) * SCALE, (d.m[0] === "lamp_post" ? 3.2 : 2) * T, 0.5 * night);
+    }
+    if (loc === "beach" && state.chapters && state.chapters.lighthouse) for (const b of blds) {   // Year Two: the lighthouse shines again
+      if (b.kind !== "lighthouse") continue;
+      const lx = ox + (b.x0 + (b.x1 - b.x0 + 1) / 2) * T, ly = oy + b.y0 * T - Art.TOPPAD * SCALE + 18 * SCALE, a = now / 1400;
+      glow(lx, ly, 2.4 * T, 0.8 * night, 1.2);
+      for (const sgn of [1, -1]) {
+        const ang = a + (sgn < 0 ? Math.PI : 0), len = 14 * T, spread = 0.16;
+        const gr = ctx.createLinearGradient(lx, ly, lx + Math.cos(ang) * len, ly + Math.sin(ang) * len * 0.45);
+        gr.addColorStop(0, "rgba(255,244,190," + (0.55 * night).toFixed(3) + ")"); gr.addColorStop(1, "rgba(255,240,180,0)");
+        ctx.fillStyle = gr; ctx.beginPath(); ctx.moveTo(lx, ly);
+        ctx.lineTo(lx + Math.cos(ang - spread) * len, ly + Math.sin(ang - spread) * len * 0.45); ctx.lineTo(lx + Math.cos(ang + spread) * len, ly + Math.sin(ang + spread) * len * 0.45); ctx.closePath(); ctx.fill();
+      }
     }
     if (town && rvs >= 3 && !state.festival) for (const [lx, ly, col] of lanternSpots(ox, oy, now)) {   // the paper lanterns light up after dark
       glow(lx, ly + 8 * SCALE, 1.5 * T, 0.5 * night);

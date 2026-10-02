@@ -190,6 +190,7 @@ class Festivals:
         gain = max(0, score - best)                  # prizes pay for your first go and for beating your best, not for grinding
         if game == "dance" and f[0] == "hoedown":
             self.record(p, score, now)
+            self.farm_record("dance", score, now, "Record: %s danced a %d at the Spring Hoedown." % (p["name"], score))
             prize = (50 if prev is None else 0) + gain * 4
             self.coins += prize
             if prev is None:
@@ -242,6 +243,7 @@ class Festivals:
             self.event("The judges gave %s's %s a %s! (+%dg)" % (p["name"], it["name"], W.ITEMS[ribbon]["name"], score), now, "good")
         elif f[0] == "fallfest" and key == "pumpkin":
             weight = int(random.triangular(12, 160, 45))
+            self.farm_record("pumpkin", weight, now, "Record: %s's pumpkin weighed %d lb at Fallfest." % (p["name"], weight))
             scores = self.record(p, weight, now)
             self.take(p, key, 1)
             self.coins += weight * 3
@@ -303,6 +305,7 @@ class Festivals:
         if n >= 5:
             self.give(p, "derby_trophy", 1)
         self.event("Derby over! %s landed %d fish (+%dg)%s" % (p["name"], n, prize, " and a Derby Trophy!" if n >= 5 else "."), now, "good")
+        self.farm_record("derby", n, now, "Record: %s landed %d fish in the Frost Fishing Derby." % (p["name"], n))
 
     # ------------------------------------------------------------------ the bard
     def bard_menu(self, p, now):

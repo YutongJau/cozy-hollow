@@ -109,6 +109,7 @@ class TownHall:
             for (x, y) in [(34, 21), (38, 21)]:
                 self.set_terrain("town", x, y, "l")
         self.project_done(key, p, now)
+        self.scrap("The town finished the %s (the last piece from %s)." % (title, p["name"]), now, "project")
         self.bump(p, "projects")
         self.event("The town finished the %s! %s Population: %d." % (title, does, self.population()), now, "good")
         self.check_milestones(now)

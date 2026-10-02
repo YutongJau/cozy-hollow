@@ -35,7 +35,7 @@ Trees already planted elsewhere stay where they are.
   purse and their news in everyone's log; delivery favors send you across the valley and into villagers' days.
 - A "?" over a villager means you have what they asked for; L opens your quest log.
 
-**Tests live in the repo** (`tests/`), runnable by anyone.
+**Tests live in the repo** (`tests/`), runnable by anyone: `for t in tests/test_*.py; do python3 $t; done`.
 
 ## Milestone 2 - The Valley Revival (done)
 A shared progress meter at the Town Hall with five stages: Quiet, Waking, Bustling, Thriving, In Bloom. Each stage asks for
@@ -104,7 +104,15 @@ collections page (every crop, fish, bug, fossil, dish ever made), and achievemen
 - Twelve achievements of your own, each with a reward that lasts (extra health, friendlier chats, a bonus-crop chance,
   better prices, cheaper upgrades, three new hats). Tests: `python3 tests/test_collections.py`.
 
-## Milestone 8 - Yearly chapters and the scrapbook
+## Milestone 8 - Yearly chapters and the scrapbook (done)
 Each in-game year (about a real month) gets a chapter goal - Year 2 restores the lighthouse, Year 3 builds an island
 resort - and the journal grows a scrapbook that records firsts, festival winners, record catches and stage-ups with
 dates and names.
+- Year One: bring the Revival to Bustling (2000g). Year Two: bring Wren what she needs and the lighthouse shines again
+  (its beam sweeps the sea at night, and glowfish bite off the beach after dark). Year Three: build the Palm Resort with
+  Coco (guests pay the farm every day; hammocks and tropical drinks). Every year after: a Year of Plenty (earn 50,000g
+  and win Gold at two festivals, 5000g). A chapter stays open until it's done, so nobody is locked out.
+- The scrapbook (J then the button or S, or K): arrivals, the farm's firsts, rare finds, festival champions and Gold
+  scores, records (derby, pumpkin, dance, Depths), stage-ups, town projects, pantry rooms, achievements, weddings,
+  levels and chapters, by season with dates and names. Older farms start it from their log.
+  Tests: `python3 tests/test_chapters.py`.

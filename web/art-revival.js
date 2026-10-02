@@ -311,6 +311,23 @@ function telescopeSprite() {
   });
 }
 
+// ------------------------------------------------------------------ the Palm Resort (Year Three)
+const prevBuildingR = ART.areaBuilding;
+ART.areaBuilding = function (kind, w, h, night, label, season) {
+  if (kind !== "resort") return prevBuildingR(kind, w, h, night, label, season);
+  const base = prevBuildingR("tiki", w, h, night, label, season);
+  return cached("rv:resort" + w + "x" + h + (night ? 1 : 0), base.width, base.height, (g, c) => {
+    g.drawImage(base, 0, 0);
+    const W = base.width, wallTop = ART.TOPPAD + 2 * A, text = "PALM RESORT", lw = ART.textWidth(text, 1) + 10;
+    px(g, Math.floor(W / 2 - lw / 2) - 1, wallTop + 1, lw + 2, 11, OUT); px(g, Math.floor(W / 2 - lw / 2), wallTop + 2, lw, 9, "#3fa6a0"); px(g, Math.floor(W / 2 - lw / 2), wallTop + 2, lw, 1, "#7ad8cc");
+    ART.text3x5(g, Math.floor(W / 2 - lw / 2) + 5, wallTop + 4, text, "#fff2c0", 1);
+    const fx = ART.OV + 18, fy = base.height - 30;           // a pink flamingo by the steps
+    px(g, fx + 3, fy + 12, 1, 14, "#e86a9a"); px(g, fx + 6, fy + 12, 1, 14, "#e86a9a"); ell(g, fx + 5, fy + 9, 6, 4, "#ff9cc6"); px(g, fx + 9, fy - 2, 2, 9, "#ff9cc6");
+    px(g, fx + 9, fy - 4, 4, 3, "#ff9cc6"); px(g, fx + 13, fy - 3, 2, 2, OUT); dot(g, fx + 11, fy - 3, OUT);
+    for (let i = 0; i < 5; i++) { const x = ART.OV + 30 + i * Math.floor((w * A - 60) / 4), col = ["#e0524f", "#f2c744", "#3fa6a0", "#ff7eb6", "#f28c28"][i]; px(g, x, wallTop - 4, 5, 6, night ? mix(col, "#fff2b0", 0.4) : col); dot(g, x + 2, wallTop - 5, OUT); }
+  });
+};
+
 // ------------------------------------------------------------------ icons for the things the Revival brings
 const ICONS = {
   valley_medal: (g) => {   // a gold medal on a pink and green ribbon, a sprout stamped in the middle
@@ -320,6 +337,23 @@ const ICONS = {
     px(g, 16, 18, 1, 6, "#b08a20"); px(g, 13, 19, 3, 1, "#b08a20"); px(g, 17, 18, 3, 1, "#b08a20"); dot(g, 12, 18, "#b08a20"); dot(g, 20, 17, "#b08a20");
   },
 };
+// the lighthouse's glowfish and the Palm Resort's drinks
+Object.assign(ICONS, {
+  glowfish: (g) => {
+    ell(g, 15, 16, 10, 6, "#1f7a8a"); ell(g, 14, 15, 9, 5, "#3fc0c8"); ell(g, 12, 14, 4, 2, "#a8f0e8");
+    for (let i = 0; i < 6; i++) px(g, 25 + Math.floor(i / 2), 13 + i - (i > 2 ? 0 : 0), 3, 1, "#1f7a8a"); px(g, 25, 11, 3, 3, "#1f7a8a"); px(g, 25, 19, 3, 3, "#1f7a8a");
+    px(g, 7, 13, 3, 3, "#ffffff"); dot(g, 8, 14, OUT); px(g, 16, 8, 2, 4, "#2a9aa8"); dot(g, 16, 6, "#fff27a"); dot(g, 17, 5, "#fff27a"); dot(g, 15, 6, "#fff9c0");
+    for (const [x, y] of [[13, 17], [18, 18], [20, 14]]) dot(g, x, y, "#fff27a");
+  },
+  coconut_cooler: (g) => {
+    ell(g, 16, 20, 9, 8, "#6a4228"); ell(g, 15, 19, 8, 7, "#8a5a34"); ell(g, 16, 13, 8, 3, "#f4f1ea"); ell(g, 16, 13, 6, 2, "#ffffff");
+    px(g, 19, 3, 2, 11, "#e0524f"); px(g, 18, 3, 3, 1, "#e0524f"); for (let i = 0; i < 7; i++) px(g, 7 + i, 6 + Math.abs(3 - i), 1, 6 - Math.abs(3 - i), i % 2 ? "#f2c744" : "#5ab0f0"); px(g, 10, 9, 1, 6, "#8a6a3c");
+  },
+  sunset_smoothie: (g) => {
+    px(g, 10, 10, 12, 18, "#e8f4f8"); px(g, 11, 12, 10, 5, "#ff9c4a"); px(g, 11, 17, 10, 5, "#ff7eb6"); px(g, 11, 22, 10, 5, "#c86ee0"); px(g, 11, 12, 2, 15, "rgba(255,255,255,0.35)");
+    px(g, 9, 9, 14, 2, "#f4f1ea"); ell(g, 21, 9, 3, 3, "#ffb84a"); dot(g, 20, 8, "#ffe0a0"); px(g, 14, 2, 2, 9, "#3fa66a");
+  },
+});
 // the festival hunts: little things hidden around town
 Object.assign(ICONS, {
   painted_egg: (g) => { ell(g, 16, 17, 8, 10, "#ff9cc6"); px(g, 9, 14, 15, 3, "#7fd8e8"); px(g, 9, 20, 15, 2, "#f2c744"); for (const x of [11, 15, 19]) dot(g, x, 15, "#ffffff"); ell(g, 13, 11, 2, 3, "#ffd0e8"); },

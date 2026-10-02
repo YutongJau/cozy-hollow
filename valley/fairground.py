@@ -127,6 +127,8 @@ class Fairground:
             if q:
                 self.tier_prizes(q, f[0], tier, tier)
         self.event("The farm's %s score reached %s! (%d points) Prize: %s." % (f[1], name, self.farm_score(key), prize), now, "good")
+        if tier == 3:
+            self.scrap("The farm won Gold at the %s." % f[1], now, "festival")
 
     def _tick_fair(self, now):
         f = self.festival(now)
@@ -160,6 +162,7 @@ class Fairground:
             self.coins += 1000
             prize = "1000g for the purse"
         self.event("%s is the champion of the %s with %d points! They win %s." % (name, title, sum(pts[name].values()), prize), now, "good")
+        self.scrap("%s was the champion of the %s (%d points)." % (name, title, sum(pts[name].values())), now, "champion")
 
     # ------------------------------------------------------------------ the hunt
     def hunt_spots(self):

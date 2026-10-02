@@ -52,6 +52,7 @@ class Finale:
         if quiet:
             return
         self.bloom["until"] = now + BLOOM_FEST
+        self.scrap("The Valley Bloom Festival: every villager in the square, fireworks, and the Bloom monument raised with every farmer's name.", now, "stage")
         self.event("The Valley Bloom Festival begins! Every villager is gathering in the square, there'll be fireworks tonight, "
                    "and a monument with every farmer's name now stands in the south plaza. Talk to Mayor Hazel for your gifts!", now, "good")
         for q in self.players.values():

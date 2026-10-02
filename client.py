@@ -638,6 +638,9 @@ class Client:
         elif key in ("f", "F"):
             self.mode = "play"
             self.send(dict(t="friends"))
+        elif key in ("s", "S"):
+            self.mode = "play"
+            self.send(dict(t="scrapbook"))
 
     def keys_help(self, key):
         if key in ("ESC", "q", "ENTER", "?", " "):
@@ -2329,7 +2332,7 @@ class Client:
                 break
             self.put(yy, x + 2 + (i % 3) * col_w, ("%s %s" % ("*" if got else "-", m))[:col_w - 1],
                      self.pal.pair("yellow") | curses.A_BOLD if got else curses.A_DIM)
-        self.put(y + bh - 2, x + 2, "Esc / Enter close", curses.A_DIM)
+        self.put(y + bh - 2, x + 2, "F friends   S the scrapbook   Esc / Enter close", curses.A_DIM)
 
     def draw_inventory(self, h, w):
         m = self.menu
@@ -2370,7 +2373,7 @@ class Client:
         ("Levels", "new seeds, saplings, recipes and deeper mine floors open as you level. Fruit trees grow only in the "
                    "tree spots (\u0166) in the orchard meadow south of the fields; more open as you level."),
         ("Villagers", "folks walk to work, the shops and home on the clock. E chats; E again while holding something gives it as a gift. "
-                      "J then F lists your friends."),
+                      "J then F lists your friends, J then S opens the scrapbook."),
         ("The valley", "walk off the farm's edges to town, the forest, the beach, the mountain and the mine. Festivals fill the "
                        "town square on set days - talk to Mayor Hazel. Monsters live in the mine: hold a sword or bow and press E."),
         ("shift-Q", "leave. The farm keeps growing while you are away."),

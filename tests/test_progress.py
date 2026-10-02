@@ -163,6 +163,7 @@ check(len(favors) == Q.FAVORS_PER_DAY, "%d villagers have a favor today: %s" % (
 fetch = next(((name, f) for name, f in favors.items() if f["kind"] == "fetch" and not Q.Quests.story_offer(w, p, name)), None)
 if fetch:
     name, f = fetch
+    hold("hoe")                       # a farmer holding a giftable item who already chatted today would give it instead
     face_villager(name)
     out = act(t="interact")
     check(any(m[1].get("id") == "quest" for m in out), "%s asks a favor: %s" % (name, f["line"]))
