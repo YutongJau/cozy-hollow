@@ -214,10 +214,10 @@ class Combat:
                 self.mobs[loc] = []
         # health comes back slowly when nothing is biting
         for p in self.players.values():
-            if p.get("online") and p.get("hp", W.MAX_HP) < W.MAX_HP and now - p.get("last_hit", 0) > 6:
+            if p.get("online") and p.get("hp", W.MAX_HP) < self.max_hp(p) and now - p.get("last_hit", 0) > 6:
                 if now - p.get("regen", 0) >= REGEN:
                     p["regen"] = now
-                    p["hp"] = min(W.MAX_HP, p.get("hp", W.MAX_HP) + 1)
+                    p["hp"] = min(self.max_hp(p), p.get("hp", W.MAX_HP) + 1)
                     self.dirty = True
         self.prune_depths(now)
 
@@ -333,7 +333,7 @@ class Combat:
         self.dirty = True
         self.moved = True
         if p["hp"] <= 0:
-            p["hp"] = W.MAX_HP // 2
+            p["hp"] = self.max_hp(p) // 2
             p["riding"] = False
             lost = random.sample(p["inventory"], 0)
             self.out.append((p["name"], dict(t="msg", text="Everything goes dark... You wake up outside the mine, a little bruised.", style="warn")))
@@ -511,7 +511,7 @@ class Combat:
             rows.append(dict(key=prize[0], label=title, info="%s %d/%d  ·  prize: %s and %dg" % ({"depth": "reach floor", "kings": "defeat the Slime King"}.get(key, "defeat " + key), min(have, n), n, W.ITEMS[prize[0]]["name"], coins),
                              act=dict(t="claim_goal", goal=title), ok=have >= n and not got, right="Claimed" if got else ("Claim" if have >= n else "")))
         rows.append(dict(section="Heal"))
-        rows.append(dict(label="Patch me up", info="Back to full health for 50g.", act=dict(t="heal"), ok=p.get("hp", 100) < W.MAX_HP and self.coins >= 50, right="50g"))
+        rows.append(dict(label="Patch me up", info="Back to full health for 50g.", act=dict(t="heal"), ok=p.get("hp", 100) < self.max_hp(p) and self.coins >= 50, right="50g"))
         self.list_menu(p, "guild", "Adventurers' Guild", rows, sub="Captain Ash: \"Monsters lurk in the mine, and worse in the Depths below level three.\"", keep=True)
 
     def act_claim_goal(self, p, msg, now):
@@ -532,6 +532,6 @@ class Combat:
         if p.get("loc") not in ("guild", "clinic") or self.coins < 50:
             return
         self.coins -= 50
-        p["hp"] = W.MAX_HP
+        p["hp"] = self.max_hp(p)
         self.say(p, "Good as new!", "good")
         self.dirty = True

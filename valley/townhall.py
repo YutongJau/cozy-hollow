@@ -42,7 +42,8 @@ class TownHall:
         snap["town"] = dict(pop=self.population(), done=[k for k, v in self.projects.items() if v.get("done")])
 
     def town_menu(self, p, now):
-        rows = []
+        rows = [dict(label="The Valley Pantry", info="Fill bundles together; every finished room gives the farm a lasting perk (%d of 5 rooms)." % len(self.pantry["rooms"]),
+                     act=dict(t="pantry"), ok=True, right="Open"), dict(section="Town projects")]
         for key, title, does, mats, coins, people in PROJECTS:
             st = self.projects.get(key, {})
             if st.get("done"):

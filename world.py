@@ -534,13 +534,13 @@ def catalog():
 # World
 # --------------------------------------------------------------------------
 # the feature modules: each registers its items when imported and adds a mixin to World
-from valley import crafting, animals, villagers, museum, festivals, skies, combat, landscape, townhall, progress, quests, revival, bloom, finale, economy, fairground   # noqa: E402
-HOOKS = ["craft", "animals", "folk", "museum", "fest", "sky", "combat", "land", "town", "progress", "quests", "revival", "bloom", "finale", "economy", "fair"]
+from valley import crafting, animals, villagers, museum, festivals, skies, combat, landscape, townhall, progress, quests, revival, bloom, finale, economy, fairground, pantry   # noqa: E402
+HOOKS = ["craft", "animals", "folk", "museum", "fest", "sky", "combat", "land", "town", "progress", "quests", "revival", "bloom", "finale", "economy", "fair", "collect"]
 MAX_HP = 100
 
 
 class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Museum, festivals.Festivals, skies.Skies,
-            combat.Combat, landscape.Landscape, townhall.TownHall, progress.Progress, quests.Quests, revival.Revival, bloom.Bloom, finale.Finale, economy.Economy, fairground.Fairground):
+            combat.Combat, landscape.Landscape, townhall.TownHall, progress.Progress, quests.Quests, revival.Revival, bloom.Bloom, finale.Finale, economy.Economy, fairground.Fairground, pantry.Collections):
     def _run(self, phase, *args):
         """Call every feature module's hook for this phase (init, load, save, tick, fast, snap, join, leave, pub, priv)."""
         for n in HOOKS:
@@ -1037,6 +1037,8 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
 
     # inventory ------------------------------------------------------------
     def give(self, p, key, n):
+        if hasattr(self, "note_found"):
+            self.note_found(p, key)
         for slot in p["inventory"]:
             if slot[0] == key:
                 slot[1] += n
@@ -1218,14 +1220,14 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
             for c in self.cows:
                 c["milk"] = min(MILK_EVERY, c.get("milk", 0) + step)
             self.forage_timer += step
-            while self.forage_timer >= FORAGE_INTERVAL:
-                self.forage_timer -= FORAGE_INTERVAL
+            while self.forage_timer >= self.forage_interval():
+                self.forage_timer -= self.forage_interval()
                 self.spawn_forage(mid)
                 for i, area in enumerate(AR.AREA_FORAGE):
                     self.spawn_area_forage(area, mid + i * 0.37)
             self.ore_timer += step
-            while self.ore_timer >= ORE_INTERVAL:
-                self.ore_timer -= ORE_INTERVAL
+            while self.ore_timer >= self.ore_interval():
+                self.ore_timer -= self.ore_interval()
                 for i, area in enumerate(ORE_MAX):
                     self.spawn_ore(area, mid + i * 0.53)
             t += step
@@ -1440,7 +1442,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         nxt = 60 * (lvl + 1) ** 2 if lvl < MAX_LEVEL else None
         d = dict(inventory=p["inventory"], selected=p["selected"], loc=p.get("loc", "farm"),
                  water=p["water"], xp=p["xp"], level=lvl, title=title_for(lvl),
-                 next_xp=nxt, stats=p.get("stats", {}), hp=p.get("hp", MAX_HP), max_hp=MAX_HP)
+                 next_xp=nxt, stats=p.get("stats", {}), hp=p.get("hp", MAX_HP), max_hp=self.max_hp(p))
         self._run("priv", p, d)
         return d
 
@@ -1812,7 +1814,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         if loc == "clinic":
             rows = [dict(key="adopt_dog", label="Adopt a dog", info="A loyal friend who follows you everywhere.", act=dict(t="adopt", kind="dog"), ok=not p.get("pet"), right="Adopt"),
                     dict(key="adopt_cat", label="Adopt a cat", info="An independent friend who follows you anyway.", act=dict(t="adopt", kind="cat"), ok=not p.get("pet"), right="Adopt"),
-                    dict(label="A check-up", info="Back to full health for 50g.", act=dict(t="heal"), ok=p.get("hp", MAX_HP) < MAX_HP and self.coins >= 50, right="50g")]
+                    dict(label="A check-up", info="Back to full health for 50g.", act=dict(t="heal"), ok=p.get("hp", MAX_HP) < self.max_hp(p) and self.coins >= 50, right="50g")]
             return self.list_menu(p, "clinic", "Doc Alder's Clinic", rows, sub="\"Strays turn up here all the time. Want to give one a home?\"")
         if loc == "smith":
             rows = [dict(key="sword_copper", label="Forge a Copper Sword", info="6 copper ore and 100g.", act=dict(t="forge", item="sword_copper"), ok=self.count(p, "copper_ore") >= 6 and self.coins >= 100, right="Forge"),
@@ -1940,7 +1942,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         key = tl.pop("forage")
         if not tl:
             del self.atiles[loc][pos]
-        self.give(p, key, 1)
+        self.give(p, key, 2 if self.perk(p, "forager") and random.random() < 0.2 else 1)
         self.fx(p, "lift", key, pos)
         p["xp"] += 5
         self.bump(p, "foraged")
@@ -2102,7 +2104,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         if p["water"] <= 0:
             return self.say(p, "Your can is empty! Face the pond and press E to refill.", "warn")
         p["water"] -= 1
-        tile["wet_until"] = now + WATER_DURATION
+        tile["wet_until"] = now + self.water_time()
         self.bump(p, "watered")
         crop = tile.get("crop")
         if crop:
@@ -2181,7 +2183,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         self.fx(p, "lift", crop["kind"], pos)
         lo, hi = c["yield_"]
         n = random.randint(lo, hi)
-        if random.random() < min(0.6, 0.03 * level_for(p["xp"])):           # a bonus crop now and then, more often as you level
+        if random.random() < min(0.6, 0.03 * level_for(p["xp"])) + (0.05 if self.perk(p, "green_thumb") else 0):           # a bonus crop now and then, more often as you level
             n += 1
         self.give(p, crop["kind"], n)
         p["xp"] += 8 + c["sell"] // 4
@@ -2229,7 +2231,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
     def pick_forage(self, p, pos, tile, now):
         key = tile.pop("forage")
         self.prune(pos)
-        self.give(p, key, 1)
+        self.give(p, key, 2 if self.perk(p, "forager") and random.random() < 0.2 else 1)
         self.fx(p, "lift", key, pos)
         p["xp"] += 5
         self.bump(p, "foraged")
@@ -2288,7 +2290,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         n = min(n, have)
         self.take(p, item, n)
         self.note_shipped(p, item, now)
-        earned = ITEMS[item]["sell"] * n
+        earned = int(ITEMS[item]["sell"] * n * (1.05 if self.perk(p, "collector") else 1))
         self.coins += earned
         p["xp"] += max(1, earned // 20)
         self.bump(p, "earned", earned)
@@ -2306,6 +2308,8 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
                 total += ITEMS[key]["sell"] * n
         if total <= 0:
             return self.say(p, "Nothing to sell (seeds and tools stay).", "warn")
+        if self.perk(p, "collector"):
+            total = int(total * 1.05)
         self.coins += total
         p["xp"] += max(1, total // 20)
         self.bump(p, "earned", total)
@@ -2377,8 +2381,11 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         key = f["fish"]
         if not msg.get("ok"):
             return self.say(p, "It got away...", "warn")
-        self.give(p, key, 1)
         fish = FISH[key]
+        two = not fish["junk"] and self.room_done("fisher") and random.random() < 0.15
+        self.give(p, key, 2 if two else 1)
+        if two:
+            self.say(p, "Two on one line! (the Fisher's Chest)", "good")
         if fish["junk"]:
             p["xp"] += 2
             return self.say(p, "You fished up... %s%s. Huh." % ("an " if key[0] in "aeiou" else "a ", fish["name"]))

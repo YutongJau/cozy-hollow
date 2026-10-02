@@ -165,7 +165,7 @@ class Bloom:
     def soak(self, p, now):
         if self.stage() < 3:
             return self.say(p, "Warm water bubbles up between the stones.")
-        p["hp"] = W.MAX_HP
+        p["hp"] = self.max_hp(p)
         from valley.crafting import BUFFS
         p.setdefault("buffs", {})["speed"] = now + BUFFS["speed"][1]
         day = int(now // W.SKY_DAY)

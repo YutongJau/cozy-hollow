@@ -90,6 +90,8 @@ class Fairground:
         f = self.festival(now)
         if not f or pts <= 0:
             return 0
+        if self.perk(p, "party"):
+            pts = int(round(pts * 1.1))
         key = self.fest_key(now)
         mine = self.fest_pts.setdefault(key, {}).setdefault(p["name"], {})
         new = not any(mine.values())

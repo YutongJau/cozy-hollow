@@ -342,7 +342,7 @@ class Villagers:
         first = name not in met
         if met.get(name) != day:
             met[name] = day
-            self.befriend(p, name, TALK_POINTS)
+            self.befriend(p, name, int(TALK_POINTS * (1.5 if self.perk(p, "friend_to_all") else 1)))
         lines = list(AR.KEEPER_LINES.get(name, ["Lovely day, isn't it?"]))
         hearts = self.hearts(p, name)
         if hearts >= 3:

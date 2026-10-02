@@ -94,9 +94,15 @@ winning (hats, decorations, rare seeds).
 - At midnight the day's top scorer wins that festival's hat (Bunny Ears, Rodeo Champion Hat, Rosette Hat, Witch Hat,
   Earmuffs, Holly Crown). Villagers have lines for each festival. Tests: `python3 tests/test_festivals.py`.
 
-## Milestone 7 - Collections and achievements
+## Milestone 7 - Collections and achievements (done)
 Bundles in the spirit of Stardew's Community Center (a basket of spring forage, a fisherman's chest), a full
 collections page (every crop, fish, bug, fossil, dish ever made), and achievements with small permanent rewards.
+- The Valley Pantry (Town Hall, or K): five rooms, thirteen bundles. Each bundle pays the purse and gives a prize; each
+  finished room gives the farm a lasting perk (wild things grow twice as often, soil stays wet longer, two-fish
+  catches, rocks come back twice as fast, food heals more); all five add 5000g. Bundles count for the Revival.
+- Collections (K): 144 things in ten categories, each with who found it first. Older farms start with what they had.
+- Twelve achievements of your own, each with a reward that lasts (extra health, friendlier chats, a bonus-crop chance,
+  better prices, cheaper upgrades, three new hats). Tests: `python3 tests/test_collections.py`.
 
 ## Milestone 8 - Yearly chapters and the scrapbook
 Each in-game year (about a real month) gets a chapter goal - Year 2 restores the lighthouse, Year 3 builds an island

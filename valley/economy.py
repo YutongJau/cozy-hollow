@@ -182,6 +182,7 @@ class Economy:
         if lv >= len(TOOL_TIERS):
             return
         tier, ore, coins = TOOL_TIERS[lv]
+        coins = int(coins * (0.9 if self.perk(p, "big_earner") else 1))
         if self.count(p, ore) < TOOL_ORE or self.coins < coins:
             return self.say(p, "Ingrid: For a %s %s I need %d %s and %dg." % (tier.lower(), UPGRADABLE[tool].lower(), TOOL_ORE, W.ITEMS[ore]["name"], coins), "warn")
         self.take(p, ore, TOOL_ORE)
@@ -225,7 +226,7 @@ class Economy:
             tl = self.tiles.get(t, {})
             if tl.get("soil") and tl.get("wet_until", 0) <= now and p["water"] > 0:
                 p["water"] -= 1
-                tl["wet_until"] = now + W.WATER_DURATION
+                tl["wet_until"] = now + self.water_time()
                 self.bump(p, "watered")
                 n += 1
         if not n:
@@ -265,6 +266,7 @@ class Economy:
         if key not in UPGRADES or p.get("loc") != "carpenter" or self.has_upgrade(key):
             return
         name, what, coins, mats, needs = UPGRADES[key]
+        coins = int(coins * (0.9 if self.perk(p, "builder") else 1))
         if (needs == "#coop" and not self.has_coop()) or (needs and needs != "#coop" and not self.has_upgrade(needs)):
             return self.say(p, "Oakley: One thing at a time - that comes after the %s." % ("coop" if needs == "#coop" else UPGRADES[needs][0]), "warn")
         if self.coins < coins or not all(self.count(p, k) >= n for k, n in mats):

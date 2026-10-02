@@ -308,6 +308,9 @@ const HATS = {
     for (let i = 0; i < 6; i++) { const x = 8 + i * 3, y = 2 + (i % 2), c = ["#ff7eb6", "#ffe066", "#ffffff", "#ff9ccf", "#ffd25a", "#f4a0d8"][i]; px(g, x, y, 3, 3, c); dot(g, x + 1, y + 1, i % 3 === 1 ? "#e0802a" : "#f2c744"); dot(g, x + 1, y - 1, c); }
     if (!back) { px(g, 14, 0, 4, 3, "#ff5a9a"); dot(g, 15, 1, "#ffe066"); dot(g, 16, 1, "#ffe066"); }
   },
+  angler: (g, back) => { px(g, 9, 3, 14, 6, "#4f8f6a"); px(g, 9, 3, 14, 2, "#6aa884"); px(g, 4, 8, 24, 2, "#3e7a58"); px(g, 4, 8, 24, 1, "#5a9a74"); if (!back) { px(g, 19, 4, 3, 3, "#f2c744"); px(g, 21, 6, 2, 1, "#e0524f"); } },
+  explorer: (g, back) => { px(g, 3, 9, 26, 2, "#c9a66b"); px(g, 3, 9, 26, 1, "#e0c08a"); px(g, 9, 3, 14, 7, "#d9b67a"); px(g, 9, 3, 14, 2, "#ead2a0"); px(g, 9, 7, 14, 2, "#7a4a2a"); px(g, 13, 2, 6, 1, "#c9a66b"); },
+  miner: (g, back) => { px(g, 8, 3, 16, 7, "#f2c744"); px(g, 8, 3, 16, 2, "#fff2a8"); px(g, 6, 8, 20, 2, "#d9a640"); px(g, 15, 2, 2, 8, "#d9a640"); if (!back) { px(g, 13, 4, 6, 4, "#5c5c62"); px(g, 14, 5, 4, 2, "#fff4c0"); } },
   bunny: (g, back) => { px(g, 9, 6, 14, 3, "#f4f1ea"); for (const x of [10, 18]) { px(g, x, -1 + 1, 4, 7, "#f4f1ea"); px(g, x + 1, 1, 2, 5, "#ffb6c8"); } px(g, 9, 8, 14, 1, "#e0d8cc"); },
   rosette: (g, back) => { px(g, 4, 9, 24, 2, "#3a7bd5"); px(g, 9, 3, 14, 7, "#3a7bd5"); px(g, 9, 3, 14, 2, "#5a9be8"); px(g, 9, 7, 14, 2, "#2a5aa5"); if (!back) { ell6(g, 21, 6, "#e86a9a"); dot(g, 21, 6, "#f2c744"); } },
   earmuffs: (g, back) => { px(g, 9, 2, 14, 2, "#c94a3a"); px(g, 8, 3, 2, 3, "#c94a3a"); px(g, 22, 3, 2, 3, "#c94a3a"); px(g, 6, 6, 5, 6, "#f4f1ea"); px(g, 21, 6, 5, 6, "#f4f1ea"); px(g, 7, 7, 3, 4, "#ffffff"); px(g, 22, 7, 3, 4, "#ffffff"); },

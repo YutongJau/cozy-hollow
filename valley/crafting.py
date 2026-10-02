@@ -496,8 +496,8 @@ class Crafting:
         if not edible or not self.count(p, key):
             return self.say(p, "You can't eat that.", "warn")
         self.take(p, key, 1)
-        heal = it.get("hp") or 10
-        p["hp"] = min(W.MAX_HP, p.get("hp", W.MAX_HP) + heal)
+        heal = int((it.get("hp") or 10) * self.heal_mult(p))
+        p["hp"] = min(self.max_hp(p), p.get("hp", W.MAX_HP) + heal)
         msgs = ["Ate the %s." % it["name"]]
         if it.get("buff"):
             name, secs = BUFFS[it["buff"]]
