@@ -341,6 +341,24 @@ ART.areaBuilding = function (kind, w, h, night, label, season) {
   });
 };
 
+// ------------------------------------------------------------------ a tree spot in the orchard meadow: a ring of mulch and a stake (32x40,
+// the stake pokes above the tile); a locked spot hangs a little sign with the level it opens at
+function treeSpotSprite(level, locked) {
+  return cached("treespot" + (locked ? level : "open"), A, A + 8, (g, cv) => {
+    ell(g, 16, 34, 11, 4, "#5a3c26"); ell(g, 16, 33, 9, 3, "#7a5434");
+    for (const [x, y] of [[10, 33], [14, 35], [19, 32], [22, 34], [13, 32]]) dot(g, x, y, "#94683e");
+    px(g, 21, 16, 2, 18, "#a5713f"); px(g, 21, 16, 1, 18, "#c88a52"); px(g, 21, 15, 2, 1, "#7a4a24");
+    if (!locked) { px(g, 19, 19, 6, 2, "#6cc24a"); px(g, 19, 19, 6, 1, "#9ae07a"); px(g, 23, 21, 2, 3, "#4f9e3b"); }
+    else {
+      const label = "LV" + level, w = ART.textWidth(label) + 4;
+      px(g, 22 - w, 9, w, 9, "#d9b06a"); px(g, 22 - w, 9, w, 1, "#f0d090"); px(g, 22 - w, 17, w, 1, "#a07a3a");
+      px(g, 20 - w + 4, 6, 1, 3, "#7a4a24"); px(g, 20, 6, 1, 3, "#7a4a24");
+      ART.text3x5(g, 24 - w, 11, label, "#5a3a1a");
+    }
+    outline(cv, OUT);
+  });
+}
+
 // bag and menu icons for the things you set down: the same sprite you see on the farm, shrunk to fit
 const MACHINE_KEYS = ["cheese_press", "preserves_jar", "mayo_machine", "bee_house", "rock_tumbler", "animal_trap", "craft_table", "tailor_table"];
 function toolbeltIcon(g) {
@@ -357,5 +375,5 @@ ART.iconCanvas = function (key, cat) {
   return prevIconL(key, cat);
 };
 
-Object.assign(ART, { PET_COATS, bullSprite, chickenSprite, petSprite, horseSprite, monsterSprite, critterSprite, digSprite, treasureSprite, balloonSprite, machineSprite, hatSprite });
+Object.assign(ART, { treeSpotSprite, PET_COATS, bullSprite, chickenSprite, petSprite, horseSprite, monsterSprite, critterSprite, digSprite, treasureSprite, balloonSprite, machineSprite, hatSprite });
 })();

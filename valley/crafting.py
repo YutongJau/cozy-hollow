@@ -399,10 +399,17 @@ class Crafting:
 
     def craft_menu(self, p):
         rows = []
+        from valley import progress as PR
+        lv = self.level_of(p)
         for rk, (out, n, needs) in CRAFT.items():
+            need = PR.craft_level(rk)
+            if lv < need:
+                rows.append(dict(key=out, label=W.ITEMS[out]["name"], info="Unlocks at level %d" % need, ok=False, dim=True, right="Lv%d" % need))
+                continue
             ok = self.have_all(p, needs)
             rows.append(dict(key=out, label=W.ITEMS[out]["name"] + (" x%d" % n if n > 1 else ""), info=self.needs_text(p, needs),
                              act=dict(t="craft", r=rk), ok=ok, right="Craft" if ok else ""))
+        rows.sort(key=lambda r: bool(r.get("dim")))
         self.list_menu(p, "craft", "Crafting", rows, sub="Make tools, machines and supplies from what you gather.",
                        foot="Wood: an axe on wild trees. Fiber: the scythe on bushes. Stone, coal and ore: the mine.", keep=True)
 
@@ -413,6 +420,9 @@ class Crafting:
         if not self.can_craft_here(p):
             return self.say(p, "You need a crafting table (or a toolbelt).", "warn")
         out, n, needs = CRAFT[rk]
+        from valley import progress as PR
+        if self.level_of(p) < PR.craft_level(rk):
+            return self.say(p, self.locked_msg(p, PR.craft_level(rk)), "warn")
         if not self.have_all(p, needs):
             return self.say(p, "Not enough materials.", "warn")
         for want, c in needs:
@@ -443,11 +453,16 @@ class Crafting:
     # ------------------------------------------------------------------ cooking and eating
     def cook_menu(self, p):
         rows = []
+        from valley import progress as PR
+        lv = self.level_of(p)
         for ck, (name, needs, sell, buff, hp) in COOK.items():
+            if lv < PR.cook_level(ck):
+                rows.append(dict(key=ck, label=name, info="Unlocks at level %d" % PR.cook_level(ck), ok=False, dim=True, right="Lv%d" % PR.cook_level(ck)))
+                continue
             ok = self.have_all(p, needs)
             rows.append(dict(key=ck, label=name, info=self.needs_text(p, needs) + ("  ·  " + BUFFS[buff][0] if buff else ""),
                              act=dict(t="cook", r=ck), ok=ok, right="Cook" if ok else "%dg" % sell))
-        rows.sort(key=lambda r: not r["ok"])
+        rows.sort(key=lambda r: (bool(r.get("dim")), not r["ok"]))
         self.list_menu(p, "cook", "Kitchen", rows, sub="Cook something good. Eat it with U (or from your bag) for a boost.",
                        foot="Flour is sold at the Mercantile and the bakery.", keep=True)
 
@@ -456,6 +471,9 @@ class Crafting:
         if ck not in COOK or p.get("loc") != "house":
             return
         name, needs, sell, buff, hp = COOK[ck]
+        from valley import progress as PR
+        if self.level_of(p) < PR.cook_level(ck):
+            return self.say(p, self.locked_msg(p, PR.cook_level(ck)), "warn")
         if not self.have_all(p, needs):
             return self.say(p, "You're missing something for the %s." % name, "warn")
         for want, c in needs:

@@ -883,8 +883,9 @@ class ClaudeBot:
                 self.shop_stock = None
                 self.send(dict(t="shop"))
                 self.wait(0.6)
-                stock = [(k, p) for k, p in (self.shop_stock or []) if W.ITEMS.get(k, {}).get("kind") == "seed"
-                         and self.season() in W.CROPS[W.ITEMS[k]["crop"]]["seasons"]]
+                lv = (self.me or {}).get("level", 0)
+                stock = [(row[0], row[1]) for row in (self.shop_stock or []) if W.ITEMS.get(row[0], {}).get("kind") == "seed"
+                         and self.season() in W.CROPS[W.ITEMS[row[0]]["crop"]]["seasons"] and (row[2] if len(row) > 2 else 0) <= lv]
                 if target:
                     stock = [s for s in stock if target.lower() in W.ITEMS[s[0]]["name"].lower()] or stock
                 if not stock:

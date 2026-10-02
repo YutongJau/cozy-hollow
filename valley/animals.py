@@ -89,6 +89,31 @@ class Animals:
         return loc == "farm" and self.chicken_at(x, y) is not None
 
     # ------------------------------------------------------------------ ticking
+    def _fast_animals(self, now):
+        """When you stop for a moment, your pet trots up and sits beside you (left or right, where you can see and pet it)."""
+        for p in self.players.values():
+            pet = p.get("pet")
+            if not pet or not p.get("online") or now - p.get("stepped", 0) < 1.2 or pet.get("sat") == p.get("stepped", 0):
+                continue
+            loc = p.get("loc", "farm")
+            if pet.get("loc") != loc:
+                continue
+            fx, fy = p["facing"]
+            sides = [(p["x"] + fy, p["y"] + fx), (p["x"] - fy, p["y"] - fx), (p["x"] - fx, p["y"] - fy), (p["x"] + fx, p["y"] + fy)]
+            if fy:                                                   # facing up or down: left or right of you
+                sides = [(p["x"] - 1, p["y"]), (p["x"] + 1, p["y"]), (p["x"], p["y"] + 1)]
+            cur = (pet.get("x"), pet.get("y"))
+            if cur in sides[:2]:
+                pet["sat"] = p.get("stepped", 0)
+                continue
+            spot = next((s for s in sides if self.walkable(s[0], s[1], loc) and not self.portal(loc, s[0], s[1])
+                         and abs(s[0] - cur[0]) + abs(s[1] - cur[1]) <= 3), None)
+            pet["sat"] = p.get("stepped", 0)
+            if spot:
+                pet["f"] = [max(-1, min(1, p["x"] - spot[0])), max(-1, min(1, p["y"] - spot[1]))]
+                pet["x"], pet["y"] = spot
+                self.moved = True
+
     def _tick_animals(self, now):
         for c in self.chickens:
             c["egg"] = min(EGG_EVERY, c.get("egg", 0) + max(0.0, now - c.get("t", now)))
@@ -134,23 +159,40 @@ class Animals:
     def _arrive_animals(self, p, frm, now):
         pet = p.get("pet")
         if pet:
-            pet["loc"], pet["x"], pet["y"] = p.get("loc", "farm"), p["x"] - p["facing"][0], p["y"] - p["facing"][1]
-            if not self.walkable(pet["x"], pet["y"], pet["loc"]):
-                pet["x"], pet["y"] = p["x"], p["y"]
+            # the pet lands beside you (behind you if there's room), never on your own tile where you'd hide it
+            loc, fx, fy = p.get("loc", "farm"), p["facing"][0], p["facing"][1]
+            spots = [(p["x"] - fx, p["y"] - fy), (p["x"] + fy, p["y"] + fx), (p["x"] - fy, p["y"] - fx), (p["x"] + fx, p["y"] + fy),
+                     (p["x"] - 1, p["y"] - 1), (p["x"] + 1, p["y"] - 1), (p["x"] - 1, p["y"] + 1), (p["x"] + 1, p["y"] + 1)]
+            spot = next((s for s in spots if self.walkable(s[0], s[1], loc) and not self.portal(loc, s[0], s[1])), (p["x"], p["y"]))
+            pet["loc"], pet["x"], pet["y"] = loc, spot[0], spot[1]
+            p["trail"] = []
         if p.get("riding") and (p.get("loc", "farm") in W.INTERIORS or p.get("loc", "").startswith(("mine", "deep"))):
             p["riding"] = False
             self.say(p, "You tie up your horse outside.")
 
     def pet_follow(self, p, ox, oy):
-        """Called after the farmer steps from (ox, oy): the pet takes the spot they left."""
+        """Called after the farmer steps from (ox, oy). The pet trails two steps behind (one if you doubled back), so it is
+        never on your tile or tucked right behind you where your farmer would hide it."""
         pet = p.get("pet")
         if not pet:
             return
+        trail = p.setdefault("trail", [])
         if pet.get("loc") != p.get("loc", "farm"):
             pet["loc"] = p.get("loc", "farm")
-        if (pet.get("x"), pet.get("y")) != (ox, oy):
-            pet["f"] = [max(-1, min(1, ox - pet.get("x", ox))), max(-1, min(1, oy - pet.get("y", oy)))]
-        pet["x"], pet["y"] = ox, oy
+            del trail[:]
+        trail.append([ox, oy])
+        del trail[:-3]
+        p["stepped"] = W.time.time()
+        here = [p["x"], p["y"]]
+        target = next((t for t in (trail[-2] if len(trail) >= 2 else None, trail[-1]) if t and list(t) != here), None)
+        if not target:
+            return
+        tx, ty = target
+        if (pet.get("x"), pet.get("y")) != (tx, ty):
+            pet["f"] = [max(-1, min(1, tx - pet.get("x", tx))), max(-1, min(1, ty - pet.get("y", ty)))]
+            if pet["f"][0] and pet["f"][1]:
+                pet["f"][1] = 0
+        pet["x"], pet["y"] = tx, ty
 
     def pet_at(self, loc, x, y):
         for q in self.players.values():

@@ -14,6 +14,7 @@ import world as W
 import areas as AR
 import pingall
 from valley import crafting as CR
+from valley import progress as PR
 
 STAGE_GLYPHS = [(".", "."), (",", ","), ("v", "v"), ("Y", "Y")]
 TREE_GLYPH = ("♣", "T")
@@ -158,7 +159,7 @@ def facing_name(f):
 
 SEASON_ICON = {"spring": "✿", "summer": "☀", "fall": "☘", "winter": "❄"}
 WEATHER_TEXT = {"sun": "Sunny", "rain": "Raining", "snow": "Snowing"}
-HINT = "WASD move  E act  F fish  1-9 hand  I bag  U eat  C craft  R ride  J journal  N map  T chat  ? help  Q quit"
+HINT = "WASD move  E act  F fish  1-9 hand  I bag  U eat  C craft  J journal  L quests  N map  T chat  ? help  Q quit"
 
 
 def wrap(text, width):
@@ -455,6 +456,8 @@ class Client:
             self.send(dict(t="clear"))
         elif key in ("u", "U"):
             self.send(dict(t="eat"))
+        elif key in ("l", "L"):
+            self.send(dict(t="quests"))
         elif key in ("n", "N"):
             if self.count_item("valley_map"):
                 self.mode = "map"
@@ -543,8 +546,11 @@ class Client:
         elif key in ("RIGHT", "+", "="):
             m["qty"] = min(99, m["qty"] + 1)
         elif key == "ENTER":
-            item, price = stock[m["cursor"]]
-            self.send(dict(t="buy", item=item, n=m["qty"]))
+            item, need = stock[m["cursor"]][0], (stock[m["cursor"]][2] if len(stock[m["cursor"]]) > 2 else 0)
+            if need <= ((self.me or {}).get("level", 0)):
+                self.send(dict(t="buy", item=item, n=m["qty"]))
+            else:
+                self.add_log("That opens at level %d." % need, "warn", toast=True)
 
     def sellables(self):
         if not self.me:
@@ -855,6 +861,9 @@ class Client:
             sy, sx = oy + y - cam_y, ox + x - cam_x
             if kind == "npc":
                 attr = (P(C256.get(extra, 255), bgfn(x, y)) if rich else P(extra if extra in FG else "white")) | B
+                mark = ((self.me or {}).get("quest_marks") or {}).get(name)
+                if mark:
+                    labels.append((sy, sx, mark, (P(226 if mark == "!" else 82) if rich else P("yellow" if mark == "!" else "green")) | B | curses.A_REVERSE))
                 words = name.split()                  # everyone shows their own initial: Hazel H, Fern F, Gus G...
                 initial = (words[-1] if len(words) > 1 and words[0] in ("Mayor", "Professor", "Doc", "Old", "Ranger", "Captain", "Mr.", "Sheriff", "Prospector", "Granny") else words[0])[0]
                 self.put(sy, sx, initial, attr | curses.A_UNDERLINE)
@@ -910,6 +919,11 @@ class Client:
             if n["loc"] == loc and (n["x"], n["y"]) == (fx, fy):
                 if n["n"] == "Mayor Hazel" and st.get("festival") and loc == "town":
                     return "Mayor Hazel - E for the %s!" % FEST_NAMES.get(st["festival"], "festival")
+                mark = ((self.me or {}).get("quest_marks") or {}).get(n["n"])
+                if mark == "?":
+                    return "%s - E to hand over what they asked for!" % n["n"]
+                if mark == "!":
+                    return "%s has something to ask you - E to talk." % n["n"]
                 giftable = sel and W.ITEMS[sel]["kind"] not in ("gear", "key", "weapon", "machine", "ammo", "treat") and sel not in W.TOOLS
                 return "%s - E to chat%s." % (n["n"], (", E again to give your " + W.ITEMS[sel]["name"]) if giftable else "")
         for pt in st.get("pets", []):
@@ -919,6 +933,9 @@ class Client:
             for c in st.get("chickens", []):
                 if (c["x"], c["y"]) == (fx, fy):
                     return "%s the chicken - %s" % (c["name"], "E to collect an egg!" if c.get("egg") else "no egg yet.")
+            spot = PR.SPOT_AT.get((fx, fy))
+            if spot is not None and "t" not in self.tiles.get((fx, fy), {}):
+                return "A tree spot - hold a sapling and press E to plant." if (self.me or {}).get("level", 0) >= spot else "A tree spot - it opens at level %d." % spot
             d = self.tiles.get((fx, fy), {})
         else:
             d = ((st.get("areas") or {}).get(loc) or {}).get("%d,%d" % (fx, fy)) or {}
@@ -1792,6 +1809,13 @@ class Client:
             for i, chh in enumerate((b.get("label") or "")[:b["w"]]):
                 if cam_x <= lx + i < cam_x + vw_eff and cam_y <= ly < cam_y + vh_eff:
                     self.put(oy + ly - cam_y, ox + lx + i - cam_x, chh, (self.pal.pair(T256["label_fg"], 124) if rich else self.pal.pair("white")) | curses.A_BOLD)
+        my_lv = (self.me or {}).get("level", 0)
+        for (sx_, sy_, lv) in PR.TREE_SPOTS:                     # the tree spots in the orchard meadow
+            if (sx_, sy_) not in self.tiles or "t" not in self.tiles[(sx_, sy_)]:
+                if cam_x <= sx_ < cam_x + vw_eff and cam_y <= sy_ < cam_y + vh_eff:
+                    open_ = my_lv >= lv
+                    attr = (self.pal.pair(70 if open_ else 244, self.cell_bg(sx_, sy_, None, night)) if rich else self.pal.pair("green" if open_ else "white"))
+                    self.put(oy + sy_ - cam_y, ox + sx_ - cam_x, self.g(("\u0166", "|")), attr | (curses.A_BOLD if open_ else curses.A_DIM))
         target = self.facing_interactive(me) if me else None
         for (tx, ty), d in self.tiles.items():
             if not (cam_x <= tx < cam_x + vw_eff and cam_y <= ty < cam_y + vh_eff):
@@ -2174,14 +2198,19 @@ class Client:
         stock = m["stock"]
         y, x, bh, bw = self.center_box(h, w, len(stock) + 8, 64, "Seed Shop  (%s stock)" % m["season"])
         self.put(y + 1, x + 2, "Shared coins: %dg" % self.state["coins"], self.pal.pair("yellow") | curses.A_BOLD)
-        for i, (k, price) in enumerate(stock):
+        my_lv = (self.me or {}).get("level", 0)
+        for i, row in enumerate(stock):
+            k, price, need = row[0], row[1], (row[2] if len(row) > 2 else 0)
             it = W.ITEMS[k]
             sel = i == m["cursor"]
-            line = "%s %s %-22s %5dg" % (">" if sel else " ", self.item_glyph(k), it["name"], price)
-            if sel:
-                line += "   x%-2d = %dg" % (m["qty"], price * m["qty"])
+            if need > my_lv:
+                line = "%s %s %-22s  Lv%d" % (">" if sel else " ", self.item_glyph(k), it["name"], need)
+            else:
+                line = "%s %s %-22s %5dg" % (">" if sel else " ", self.item_glyph(k), it["name"], price)
+                if sel:
+                    line += "   x%-2d = %dg" % (m["qty"], price * m["qty"])
             attr = curses.A_REVERSE if sel else 0
-            if price * (m["qty"] if sel else 1) > self.state["coins"]:
+            if need > my_lv or price * (m["qty"] if sel else 1) > self.state["coins"]:
                 attr |= curses.A_DIM
             self.put(y + 3 + i, x + 2, line[:bw - 4], attr)
         k = stock[m["cursor"]][0]
@@ -2303,6 +2332,9 @@ class Client:
         ("U / R / C", "U eats what you hold (or picks a snack), R hops on your horse, C crafts (at a crafting table, or anywhere with a toolbelt)."),
         ("V", "make a wish when a shooting star crosses the night sky."),
         ("N", "the valley map: every place and where everyone is. Father TongTong (by the chapel) gives you one."),
+        ("L", "your quest log. ! over a villager: a favor or a story for you; ? : you have what they asked for."),
+        ("Levels", "new seeds, saplings, recipes and deeper mine floors open as you level. Fruit trees grow only in the "
+                   "tree spots (\u0166) in the orchard meadow south of the fields; more open as you level."),
         ("Villagers", "folks walk to work, the shops and home on the clock. E chats; E again while holding something gives it as a gift. "
                       "J then F lists your friends."),
         ("The valley", "walk off the farm's edges to town, the forest, the beach, the mountain and the mine. Festivals fill the "

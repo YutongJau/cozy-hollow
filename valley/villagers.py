@@ -312,6 +312,8 @@ class Villagers:
         name, n = self.npc_at(loc, fx, fy)
         if not name:
             return False
+        if self.quest_talk(p, name, n, now):  # a favor to ask, a story to tell, or something you're bringing them
+            return True
         if loc in AR.KEEPERS and AR.KEEPERS[loc] == name:
             return False                     # the shopkeeper behind the counter: the shop handles it
         sel = self.selected_item(p)

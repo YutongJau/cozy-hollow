@@ -519,6 +519,7 @@ def catalog():
         fish={k: dict(name=f["name"], sell=f["sell"], difficulty=f["difficulty"], junk=f["junk"])
               for k, f in FISH.items()},
         player_colors=PLAYER_COLORS, sprites=SPRITES, titles=TITLES, max_level=MAX_LEVEL,
+        tree_spots=[list(t) for t in progress.TREE_SPOTS],
         water_mult=WATER_MULT, water_duration=WATER_DURATION, can=CAN_CAPACITY,
         terrain_names=TERRAIN_NAMES, map_w=MAP_W, map_h=MAP_H, pasture=PASTURE, cow_price=COW_PRICE, max_cows=MAX_COWS,
         fields=FIELDS, priest=PRIEST, altar=ALTAR, interiors=INTERIORS, interior_names=INTERIOR_NAMES, doors=DOORS,
@@ -533,13 +534,13 @@ def catalog():
 # World
 # --------------------------------------------------------------------------
 # the feature modules: each registers its items when imported and adds a mixin to World
-from valley import crafting, animals, villagers, museum, festivals, skies, combat, landscape, townhall   # noqa: E402
-HOOKS = ["craft", "animals", "folk", "museum", "fest", "sky", "combat", "land", "town"]
+from valley import crafting, animals, villagers, museum, festivals, skies, combat, landscape, townhall, progress, quests   # noqa: E402
+HOOKS = ["craft", "animals", "folk", "museum", "fest", "sky", "combat", "land", "town", "progress", "quests"]
 MAX_HP = 100
 
 
 class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Museum, festivals.Festivals, skies.Skies,
-            combat.Combat, landscape.Landscape, townhall.TownHall):
+            combat.Combat, landscape.Landscape, townhall.TownHall, progress.Progress, quests.Quests):
     def _run(self, phase, *args):
         """Call every feature module's hook for this phase (init, load, save, tick, fast, snap, join, leave, pub, priv)."""
         for n in HOOKS:
@@ -1074,11 +1075,11 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         stock = []
         for key, c in CROPS.items():
             if c["always"] or season in c["seasons"]:
-                stock.append([key + "_seed", c["seed_price"]])
+                stock.append([key + "_seed", c["seed_price"], progress.CROP_LEVEL.get(key, 0)])
         for key, tr in TREES.items():
             if tr.get("rare"):
                 continue
-            stock.append([key + "_sapling", tr["price"]])
+            stock.append([key + "_sapling", tr["price"], progress.TREE_LEVEL.get(key, 0)])
         stock.append(["fertilizer", ITEMS["fertilizer"]["price"]])
         stock.append(["sprinkler", ITEMS["sprinkler"]["price"]])
         stock.append(["cow", COW_PRICE])
@@ -1524,8 +1525,12 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         nx, ny = p["x"] + dx, p["y"] + dy
         loc = p.get("loc", "farm")
         if self.terrain(nx, ny, loc) == "D" and (loc == "mine3" or loc.startswith("deep")) and not self.portal(loc, nx, ny):
+            if not self.mine_gate(p, "deep1"):
+                return
             self.link_down(loc, nx, ny)
         dest = self.portal(loc, nx, ny)
+        if dest and dest[0] != loc and not self.mine_gate(p, dest[0]):
+            return
         if dest:
             if p.get("carry"):
                 return self.say(p, "The chest stays on the farm. Set it down first (E).", "warn")
@@ -1727,7 +1732,9 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
             return self.say(p, "Face a tree you planted to chop it.")
         if sel == "fishing_rod":
             return self.say(p, "Face the pond and press E to cast.")
-        if kind == "seed" or kind == "sapling":
+        if kind == "sapling":
+            return self.plant_at_spot(p, fpos, sel, now)
+        if kind == "seed":
             for t in targets:
                 tl = self.tiles.get(t, {})
                 if tl.get("soil") and not tl.get("crop") and not tl.get("tree"):
@@ -2229,9 +2236,12 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
 
     def act_buy(self, p, msg, now):
         item, n = msg.get("item"), max(1, min(99, int(msg.get("n", 1))))
-        price = dict((k, v) for k, v in self.shop_stock(now)).get(item)
+        price = dict((s[0], s[1]) for s in self.shop_stock(now)).get(item)
         if price is None:
             return self.say(p, "The shop doesn't sell that right now.", "warn")
+        need = progress.seed_level(item)
+        if self.level_of(p) < need:
+            return self.say(p, "Marigold: Those are tricky to grow - come back at level %d." % need, "warn")
         if item == "chicken":
             self.buy_chicken(p, now)
             return self.act_shop(p, msg, now)
