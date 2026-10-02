@@ -9,7 +9,7 @@ friendships and your story with each villager are the personal threads running t
 
 ---
 
-## Milestone 1 - Progress you can feel (in progress)
+## Milestone 1 - Progress you can feel (done)
 
 **Levels unlock things.** A single unlock table drives everything, and leveling up announces what just opened.
 - Seeds by level: turnip and potato from the start; radish, sunflower and snowdrop at 1; strawberry 2; tomato and winter
@@ -37,11 +37,15 @@ Trees already planted elsewhere stay where they are.
 
 **Tests live in the repo** (`tests/`), runnable by anyone.
 
-## Milestone 2 - The Valley Revival
+## Milestone 2 - The Valley Revival (done)
 A shared progress meter at the Town Hall with five stages: Quiet, Waking, Bustling, Thriving, In Bloom. Each stage asks for
 goals across six threads: town projects, the museum, friendships, festivals, the farm (kinds of crops shipped) and
 exploration (Depths floors, islands). Contributions are credited by name. Existing farms start at the stage their
 progress has already earned.
+- Stages 1-3 need any five of the six threads, so one stubborn thread never blocks the valley; In Bloom needs all six.
+- The meter sits in the side panel (browser) and the sidebar (terminal); K opens the Valley Book, where the Revival page
+  lists each goal, what the next stage brings, the crops shipped so far and the credits.
+- Tests: `python3 tests/test_revival.py`.
 
 ## Milestone 3 - The world reacts
 Early stages look a little worn (boarded windows, weeds, a dry fountain, dim lamps). Each stage-up brings visible change:

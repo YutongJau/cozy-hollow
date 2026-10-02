@@ -402,6 +402,14 @@ function updateHud() {
   }
   if (me) $("#can-top").textContent = "Can " + me.water + "/" + catalog.can + " · Lv" + me.level;
   if (me) { const bf = $("#buffs"), names = { speed: "\u26a1 Quick feet", luck: "\u2618 Lucky", angler: "\ud83c\udfa3 Steady hands", strength: "\u2694 Strong" }; bf.innerHTML = ""; for (const k in me.buffs || {}) bf.appendChild(el("span", null, names[k] + " " + fmt(me.buffs[k]))); }
+  const rv = st.revival;
+  if (rv) {   // the shared Valley Revival meter
+    const fl = $("#revival .flowers"); fl.innerHTML = "";
+    for (let i = 1; i <= 4; i++) fl.appendChild(el("i", i <= rv.stage ? "on" : "", "\u2740"));
+    $("#revival .stage").textContent = rv.name;
+    $("#revival .fill").style.width = (rv.next ? Math.min(1, rv.met / rv.need) * 100 : 100).toFixed(0) + "%";
+    $("#revival .next").textContent = rv.next ? Math.min(rv.met, rv.need) + " of " + rv.need + " threads towards " + rv.next : "In Bloom - thank you, everyone!";
+  }
   const q = st.quest;
   $("#quest p").textContent = q ? q.who + " needs " + q.n + " " + catalog.items[q.item].name + " for " + q.reason + ". Reward " + q.reward + "g. (you have " + countItem(q.item) + ")" : "Nothing on the board right now.";
   $("#here").textContent = describeHere();
@@ -682,10 +690,11 @@ function renderMenu(fresh) {
     body.innerHTML = "<p><kbd>WASD</kbd> or arrows to walk. You act on the tile you stand on; the pond, shop, bin, board, well, mailbox and trees are used by facing them (they glow).</p>" +
       "<p><kbd>E</kbd> or <kbd>Space</kbd> does the natural thing: till grass, plant the seed in hand, water, harvest, pick forage, refill the can at the pond or well, open the shop / bin / board.</p>" +
       "<p><kbd>F</kbd> fishes when facing the pond: keep the fish inside your net with <kbd>&larr;</kbd> <kbd>&rarr;</kbd> or the mouse.</p>" +
-      "<p><kbd>X</kbd> clears the tile you stand on, or picks up the storage chest you face (carry it and press <kbd>E</kbd> to set it down). <kbd>1</kbd>-<kbd>9</kbd> pick what you hold, <kbd>I</kbd> opens the bag, <kbd>J</kbd> the journal, <kbd>L</kbd> your quest log, <kbd>N</kbd> the valley map (Father TongTong gives you one), <kbd>T</kbd> chats, <kbd>M</kbd> music (and the songs Rowan teaches you), <kbd>+</kbd>/<kbd>-</kbd> zoom.</p>" +
+      "<p><kbd>X</kbd> clears the tile you stand on, or picks up the storage chest you face (carry it and press <kbd>E</kbd> to set it down). <kbd>1</kbd>-<kbd>9</kbd> pick what you hold, <kbd>I</kbd> opens the bag, <kbd>J</kbd> the journal, <kbd>L</kbd> your quest log, <kbd>K</kbd> the Valley Book, <kbd>N</kbd> the valley map (Father TongTong gives you one), <kbd>T</kbd> chats, <kbd>M</kbd> music (and the songs Rowan teaches you), <kbd>+</kbd>/<kbd>-</kbd> zoom.</p>" +
       "<p>Explore the valley: walk off the farm's paths west to <b>Hollow Town</b> (shops, saloon, museum, folks to talk to), north to <b>Summit Ridge</b> and its <b>mine</b> (break ore and gems with the pickaxe, ladders go deeper), south to the <b>Whisperwood</b>. From town go south to <b>Driftwood Beach</b>, where a boat at the pier sails to <b>Palm Isle</b>; the stagecoach in town rides to <b>Dusty Gulch</b>. Fish in rivers, lakes and the sea, and forage what each place grows.</p>" +
       "<p><b>Folks and festivals.</b> Villagers walk to work, the shops and home on the clock. Face one and press <kbd>E</kbd> to chat; press it again holding something to give it as a gift (everyone has favourites). On festival days the town square fills up: talk to Mayor Hazel for the line dance, the rodeo, the livestock fair, Fallfest, the fishing derby or the winter feast. The <b>Town Hall</b> takes donations for projects that grow the town and bring new neighbours.</p>" +
       "<p><b>Quests and levels.</b> A <b>!</b> over a villager means they have a favor to ask or a story to share; a <b>?</b> means you have what they asked for. <kbd>L</kbd> shows your quest log and what your next level unlocks. Levels open new seeds, saplings, recipes and deeper mine floors, and fruit trees grow only in the marked tree spots in the orchard meadow south of the fields - more spots open as you level.</p>" +
+      "<p><b>The Valley Revival.</b> Everyone on the farm brings Cozy Hollow back to life together: town projects, the museum, friendships, festivals, shipping new kinds of crop and exploring all move the meter (side panel, or <kbd>K</kbd>). Each stage changes the town; the last one is the Valley Bloom Festival.</p>" +
       "<p><b>Making things.</b> <kbd>C</kbd> crafts at a crafting table (or anywhere with a toolbelt): machines like the cheese press, preserves jar, bee house and rock tumbler, animal traps, path stones and bridges. Cook at the farmhouse fireplace, and <kbd>U</kbd> eats what you hold for health and a little boost. The tailoring table sews hats.</p>" +
       "<p><b>Animals.</b> Oakley builds a coop once the town project is done; buy chickens at the seed shop and collect eggs. Adopt a dog or cat at the clinic and buy a horse in Dusty Gulch - <kbd>R</kbd> hops on.</p>" +
       "<p><b>Adventure.</b> Monsters live in the mine: hold a sword, slingshot, bow or rifle and press <kbd>E</kbd>. A monster treat may tame a weakened one. The ladder at the bottom of the mine leads to the endless Depths. Hunt game in the wild and take it to Hank the butcher. Catch bugs with a net, dig up fossils with the hoe and donate them to the museum. At night, press <kbd>V</kbd> to wish on a shooting star; shoot down balloon presents with a slingshot; a mystery ticket sails the boat to a new island.</p>" +
@@ -784,6 +793,7 @@ window.addEventListener("keydown", (e) => {
   else if (e.key === "u" || e.key === "U") send({ t: "eat" });
   else if (e.key === "n" || e.key === "N") openMap();
   else if (e.key === "l" || e.key === "L") send({ t: "quests" });
+  else if (e.key === "k" || e.key === "K") send({ t: "book" });
   else if (e.key === "r" || e.key === "R") send({ t: "ride" });
   else if (e.key === "c" || e.key === "C") send({ t: "craft_open" });
   else if (e.key === "v" || e.key === "V") wish();
@@ -1985,6 +1995,7 @@ function drawTag(x, y, text) {
 
 $("#wish").onclick = () => { wish(); canvas.focus(); };
 $("#mapPanel .xbtn").onclick = () => closeMap();
+$("#revival").onclick = () => send({ t: "book" });
 $("#menu .xbtn").onclick = () => { if (mode === "fish") endFishing(false); else if (menu && menu.kind === "proposal") { send({ t: "propose_answer", yes: false }); closeMenu(); } else closeMenu(); };
 setupLogin();
 requestAnimationFrame(render);

@@ -182,6 +182,7 @@ class Skies:
                 self.make_mystery(now)
             dx, dy = self.mystery["dock"]
             self.bump(p, "voyages")
+            self.credit(p, "explore")
             self.check_milestones(now)
             return self.travel(p, ("mystery", dx, dy - 1, (0, -1)), now, "The boat bobs off over the waves to %s..." % self.mystery["name"])
 

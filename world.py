@@ -534,13 +534,13 @@ def catalog():
 # World
 # --------------------------------------------------------------------------
 # the feature modules: each registers its items when imported and adds a mixin to World
-from valley import crafting, animals, villagers, museum, festivals, skies, combat, landscape, townhall, progress, quests   # noqa: E402
-HOOKS = ["craft", "animals", "folk", "museum", "fest", "sky", "combat", "land", "town", "progress", "quests"]
+from valley import crafting, animals, villagers, museum, festivals, skies, combat, landscape, townhall, progress, quests, revival   # noqa: E402
+HOOKS = ["craft", "animals", "folk", "museum", "fest", "sky", "combat", "land", "town", "progress", "quests", "revival"]
 MAX_HP = 100
 
 
 class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Museum, festivals.Festivals, skies.Skies,
-            combat.Combat, landscape.Landscape, townhall.TownHall, progress.Progress, quests.Quests):
+            combat.Combat, landscape.Landscape, townhall.TownHall, progress.Progress, quests.Quests, revival.Revival):
     def _run(self, phase, *args):
         """Call every feature module's hook for this phase (init, load, save, tick, fast, snap, join, leave, pub, priv)."""
         for n in HOOKS:
@@ -1563,6 +1563,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
             if to not in seen:
                 seen.append(to)
                 self.bump(p, "explored")
+                self.credit(p, "explore")
                 self.check_milestones(now)
         if text:
             return self.say(p, text, "event")
@@ -2280,6 +2281,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
             return self.say(p, "You don't have any %s." % ITEMS[item]["name"], "warn")
         n = min(n, have)
         self.take(p, item, n)
+        self.note_shipped(p, item, now)
         earned = ITEMS[item]["sell"] * n
         self.coins += earned
         p["xp"] += max(1, earned // 20)
@@ -2294,6 +2296,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         for key, n in list(p["inventory"]):
             if ITEMS[key]["kind"] not in ("gear", "tool", "seed", "sapling", "machine", "machine_kit", "key", "weapon", "ammo", "treat", "ticket", "present", "food", "art") and ITEMS[key]["sell"] > 0:
                 self.take(p, key, n)
+                self.note_shipped(p, key, now)
                 total += ITEMS[key]["sell"] * n
         if total <= 0:
             return self.say(p, "Nothing to sell (seeds and tools stay).", "warn")

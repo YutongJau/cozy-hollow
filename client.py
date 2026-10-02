@@ -159,7 +159,7 @@ def facing_name(f):
 
 SEASON_ICON = {"spring": "✿", "summer": "☀", "fall": "☘", "winter": "❄"}
 WEATHER_TEXT = {"sun": "Sunny", "rain": "Raining", "snow": "Snowing"}
-HINT = "WASD move  E act  F fish  1-9 hand  I bag  U eat  C craft  J journal  L quests  N map  T chat  ? help  Q quit"
+HINT = "WASD move  E act  F fish  1-9 hand  I bag  U eat  C craft  J journal  L quests  K book  N map  T chat  ? help  Q quit"
 
 
 def wrap(text, width):
@@ -458,6 +458,8 @@ class Client:
             self.send(dict(t="eat"))
         elif key in ("l", "L"):
             self.send(dict(t="quests"))
+        elif key in ("k", "K"):
+            self.send(dict(t="book"))
         elif key in ("n", "N"):
             if self.count_item("valley_map"):
                 self.mode = "map"
@@ -1964,6 +1966,14 @@ class Client:
             top = me["level"] >= W.MAX_LEVEL or nxt is None or me["xp"] >= nxt   # level 1000: nothing left to fill
             self.put(y, x0 + 1, "Lv%d %s  xp %s" % (me["level"], me["title"], "MAX" if top else "%d/%d" % (me["xp"], nxt)), curses.A_DIM)
             y += 2
+        rv = st.get("revival")
+        if rv and y < y0 + h - 6:
+            self.put(y, x0 + 1, "Valley Revival", curses.A_BOLD | curses.A_UNDERLINE)
+            y += 1
+            flowers = "".join(self.g(("\u2740", "*")) if i <= rv["stage"] else self.g(("\u00b7", ".")) for i in range(1, 5))
+            line = "%s %s" % (flowers, rv["name"]) + ("  %d/%d to %s" % (min(rv["met"], rv["need"]), rv["need"], rv["next"]) if rv.get("next") else "")
+            self.put(y, x0 + 1, line[:inner] + ("  (K)" if len(line) + 5 <= inner else ""), P("green") | curses.A_BOLD)
+            y += 2
         q = st.get("quest")
         if q and y < y0 + h - 4:
             self.put(y, x0 + 1, "Notice board", curses.A_BOLD | curses.A_UNDERLINE)
@@ -2333,6 +2343,7 @@ class Client:
         ("V", "make a wish when a shooting star crosses the night sky."),
         ("N", "the valley map: every place and where everyone is. Father TongTong (by the chapel) gives you one."),
         ("L", "your quest log. ! over a villager: a favor or a story for you; ? : you have what they asked for."),
+        ("K", "the Valley Book: the Valley Revival everyone works on together (five stages, six threads), and more."),
         ("Levels", "new seeds, saplings, recipes and deeper mine floors open as you level. Fruit trees grow only in the "
                    "tree spots (\u0166) in the orchard meadow south of the fields; more open as you level."),
         ("Villagers", "folks walk to work, the shops and home on the clock. E chats; E again while holding something gives it as a gift. "

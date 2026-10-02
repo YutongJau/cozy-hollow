@@ -292,6 +292,7 @@ class Museum:
         self.museum[key] = p["name"]
         p["xp"] += 20
         self.bump(p, "donated")
+        self.credit(p, "museum")
         self.befriend(p, "Professor Fern", 15)
         self.event("%s donated a %s to the museum! (%d pieces)" % (p["name"], it["name"], len(self.museum)), now, "good")
         for n, label, coins, item in REWARDS:

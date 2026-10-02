@@ -56,7 +56,7 @@ class TownHall:
                              act=dict(t="contribute", project=key), ok=have_any or (ready and self.coins >= coins),
                              right="Finish (%dg)" % coins if ready and coins else ("Finish" if ready else "Chip in")))
         self.list_menu(p, "town", "Hollow Town Projects", rows,
-                       sub="Mayor Hazel: \"Population %d and growing! Every project needs a little help from everyone.\"" % self.population(), keep=True)
+                       sub="Mayor Hazel: \"Population %d and growing! Every project needs a little help from everyone.\"  ·  The valley is %s (K for the Revival)" % (self.population(), self.stage_name()), keep=True)
 
     def act_contribute(self, p, msg, now):
         key = msg.get("project")
@@ -75,6 +75,7 @@ class TownHall:
                 gave.append("%d %s" % (c, W.ITEMS[k]["name"]))
         if gave:
             self.bump(p, "contributed")
+            self.credit(p, "town")
             self.befriend(p, "Mayor Hazel", 10)
             self.say(p, "You chipped in %s for the %s." % (", ".join(gave), title), "good")
         if all(st["got"].get(k, 0) >= n for k, n in mats):

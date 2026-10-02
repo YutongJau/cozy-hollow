@@ -161,6 +161,8 @@ class Festivals:
     def record(self, p, score, now, game=None):
         key = self.fest_key(now) + (":" + game if game == "apples" else "")     # the apple tub keeps its own tally beside the weigh-in
         scores = self.fest_scores.setdefault(key, {})
+        if not any(p["name"] in v for k, v in self.fest_scores.items() if k.split(":apples")[0] == self.fest_key(now)):
+            self.credit(p, "fest")                       # the first thing you join on a festival day counts for the Revival
         scores[p["name"]] = max(score, scores.get(p["name"], 0))
         self.dirty = True
         return scores

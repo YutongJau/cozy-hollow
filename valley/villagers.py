@@ -354,6 +354,7 @@ class Villagers:
         if after > before:
             self.say(p, "You and %s are closer now (%d hearts)." % (name, after), "good")
             self.bump(p, "hearts")
+            self.credit(p, "friends")
         self.dirty = True
 
     def give_gift(self, p, name, n, key, now):
