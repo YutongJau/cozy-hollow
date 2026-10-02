@@ -151,11 +151,11 @@ class Festivals:
                 if W.ITEMS[k]["kind"] == "food":
                     rows.append(dict(key=k, label="Bring %s to the potluck" % W.ITEMS[k]["name"], info="Everyone shares; the town loves it.", act=dict(t="fest_enter", item=k), ok=mine is None, right="Share"))
             rows.append(dict(key="feast_gift", label="Join the gift swap", info="Someone in town has a present for you.", act=dict(t="gift_swap"), ok=not p.get("swapped") == self.fest_key(now), right="Swap"))
-        rows.append(dict(section="Today's standings"))
-        for who, sc in sorted(scores.items(), key=lambda kv: -kv[1])[:6]:
-            rows.append(dict(label=who, info="", right=str(sc), ok=False))
-        if not scores:
-            rows.append(dict(label="No one has had a go yet", ok=False))
+        if scores:
+            rows.append(dict(section="Best at the %s" % title))
+            for who, sc in sorted(scores.items(), key=lambda kv: -kv[1])[:3]:
+                rows.append(dict(label=who, info="", right=str(sc), ok=False))
+        rows += self.fair_rows(p, now)
         self.list_menu(p, "fest", title, rows, sub="Mayor Hazel: \"%s\"" % intro, keep=True)
 
     def record(self, p, score, now, game=None):
@@ -165,6 +165,9 @@ class Festivals:
             self.credit(p, "fest")                       # the first thing you join on a festival day counts for the Revival
         scores[p["name"]] = max(score, scores.get(p["name"], 0))
         self.dirty = True
+        f = self.festival(now)
+        if f:
+            self.event_points(p, f[0], game, score, now)     # every event earns festival points (see fairground)
         return scores
 
     def act_minigame(self, p, msg, now):
@@ -267,6 +270,7 @@ class Festivals:
         gift = random.choice(["honey_cake", "pumpkin_pie", "diamond", "star_fragment", "monster_treat", "fabric", "bee_house", "art_winter_town", "ruby"])
         self.give(p, gift, 1)
         self.befriend(p, giver, 30)
+        self.fest_award(p, "swap", 10, now)
         self.event("%s's secret gift-swap partner was %s: a %s!" % (p["name"], giver, W.ITEMS[gift]["name"]), now, "good")
         self.fest_menu(p, now)
 

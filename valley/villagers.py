@@ -352,7 +352,8 @@ class Villagers:
         season = self.season_at(now)
         lines.append({"spring": "The blossoms are out. Smells like spring!", "summer": "Hot one today. Stay out of the sun at noon.",
                       "fall": "Pumpkins everywhere. I love this time of year.", "winter": "Brr! Keep warm, dear farmer."}[season])
-        line = ("Oh! You must be the new farmer. I'm %s. " % name if first else "") + random.choice(lines)
+        fest = self.fest_line(name, now) if p.get("loc") == "town" and hasattr(self, "fest_line") else None
+        line = ("Oh! You must be the new farmer. I'm %s. " % name if first else "") + (fest or random.choice(lines))
         n["bubble"] = ["...", now + 2.5]
         n["f"] = [-p["facing"][0], -p["facing"][1]]
         self.dirty = True

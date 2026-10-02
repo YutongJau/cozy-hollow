@@ -308,8 +308,13 @@ const HATS = {
     for (let i = 0; i < 6; i++) { const x = 8 + i * 3, y = 2 + (i % 2), c = ["#ff7eb6", "#ffe066", "#ffffff", "#ff9ccf", "#ffd25a", "#f4a0d8"][i]; px(g, x, y, 3, 3, c); dot(g, x + 1, y + 1, i % 3 === 1 ? "#e0802a" : "#f2c744"); dot(g, x + 1, y - 1, c); }
     if (!back) { px(g, 14, 0, 4, 3, "#ff5a9a"); dot(g, 15, 1, "#ffe066"); dot(g, 16, 1, "#ffe066"); }
   },
+  bunny: (g, back) => { px(g, 9, 6, 14, 3, "#f4f1ea"); for (const x of [10, 18]) { px(g, x, -1 + 1, 4, 7, "#f4f1ea"); px(g, x + 1, 1, 2, 5, "#ffb6c8"); } px(g, 9, 8, 14, 1, "#e0d8cc"); },
+  rosette: (g, back) => { px(g, 4, 9, 24, 2, "#3a7bd5"); px(g, 9, 3, 14, 7, "#3a7bd5"); px(g, 9, 3, 14, 2, "#5a9be8"); px(g, 9, 7, 14, 2, "#2a5aa5"); if (!back) { ell6(g, 21, 6, "#e86a9a"); dot(g, 21, 6, "#f2c744"); } },
+  earmuffs: (g, back) => { px(g, 9, 2, 14, 2, "#c94a3a"); px(g, 8, 3, 2, 3, "#c94a3a"); px(g, 22, 3, 2, 3, "#c94a3a"); px(g, 6, 6, 5, 6, "#f4f1ea"); px(g, 21, 6, 5, 6, "#f4f1ea"); px(g, 7, 7, 3, 4, "#ffffff"); px(g, 22, 7, 3, 4, "#ffffff"); },
+  holly: (g, back) => { px(g, 8, 6, 16, 2, "#2c6628"); for (const x of [9, 13, 17, 21]) { px(g, x, 3, 3, 4, "#3f8f3a"); dot(g, x + 1, 2, "#5fb04a"); } for (const x of [12, 16, 20]) { px(g, x, 5, 2, 2, "#e0242c"); dot(g, x, 5, "#ff8a8a"); } },
   crown: (g, back) => { px(g, 10, 4, 12, 4, "#f2c744"); for (let i = 0; i < 4; i++) px(g, 10 + i * 4, 1 + (i % 2), 2, 3, "#f2c744"); px(g, 10, 4, 12, 1, "#fff2a8"); for (const [x, c] of [[12, "#e0384f"], [15, "#5ab0f0"], [19, "#3cc070"]]) dot(g, x, 6, c); },
 };
+function ell6(g, cx, cy, col) { px(g, cx - 2, cy - 1, 5, 3, col); px(g, cx - 1, cy - 2, 3, 5, col); }
 function hatSprite(kind, facing) {
   if (!HATS[kind]) return null;
   const back = facing === "up";

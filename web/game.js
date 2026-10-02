@@ -1088,6 +1088,11 @@ function renderFrame(now) {
     ents.push({ y: v.y + 0.85, draw: () => drawSide(Art.critterSprite(c.k, v.moving ? Math.floor(now / 140) % 2 : 0), v.x, v.y, c.f, ox, oy, big ? 48 * SCALE : T, big ? -12 : c.k === "rabbit" ? 3 : 2, big ? -8 : 0) });
   }
   if (loc === "town" && state.festival) festivalDecor(state.festival, ents, ox, oy, now);
+  if (loc === "town" && state.hunt) for (const [hx, hy] of state.hunt.at) {   // the festival hunt: things hidden around town, with a twinkle
+    if (!inView(hx, hy)) continue;
+    const sx = ox + hx * T, sy = oy + hy * T, bob = Math.round(Math.sin(now / 300 + hx) * SCALE);
+    ents.push({ y: hy + 0.3, draw: () => { ctx.drawImage(Art.iconCanvas(state.hunt.kind, catalog), sx + 7 * SCALE, sy + 9 * SCALE + bob, 18 * SCALE, 18 * SCALE); if (Math.floor(now / 400 + hx + hy) % 4 === 0) { ctx.fillStyle = "#ffffff"; ctx.fillRect(sx + 22 * SCALE, sy + 8 * SCALE, 2 * SCALE, 2 * SCALE); } } });
+  }
   else if (town && rvs >= 2) revivalDecor(rvs, ents, ox, oy, now, nightAlpha());
   // 3. buildings: shadows, the farmhouse porch and smoke, then the sprites as depth-sorted entities
   const blds = farm ? buildings.concat(extraBuildings("farm")) : areaBuildings(loc);
@@ -1259,7 +1264,7 @@ function renderFrame(now) {
       }
     }
     if (farm) for (const k in tiles) {   // lamp posts and stone lanterns from Oakley's catalogue light up the farm at night
-      const d = tiles[k]; if (!d.m || (d.m[0] !== "lamp_post" && d.m[0] !== "stone_lantern")) continue;
+      const d = tiles[k]; if (!d.m || !["lamp_post", "stone_lantern", "jack_o_lantern", "festive_tree"].includes(d.m[0])) continue;
       const [lx, ly] = k.split(",").map(Number); if (lx < x0 - 3 || lx > x1 + 3 || ly < y0 - 3 || ly > y1 + 3) continue;
       glow(ox + lx * T + T / 2, oy + ly * T + (d.m[0] === "lamp_post" ? 8 : 14) * SCALE, (d.m[0] === "lamp_post" ? 3.2 : 2) * T, 0.5 * night);
     }

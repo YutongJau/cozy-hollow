@@ -66,7 +66,8 @@ MACHINE_GLYPHS = {"cheese_press": "\u2565", "preserves_jar": "\u25d8", "mayo_mac
                   "rock_tumbler": "\u25cd", "animal_trap": "\u2302", "craft_table": "\u2564", "tailor_table": "\u2566",
                   # Oakley's furniture
                   "garden_bench": "\u2550", "flower_planter": "\u273f", "lamp_post": "\u00a1", "garden_gnome": "\u00a7", "bird_bath": "\u03a8",
-                  "stone_lantern": "\u2229", "scarecrow": "\u2020", "sundial": "\u25d4", "topiary": "\u25cf"}
+                  "stone_lantern": "\u2229", "scarecrow": "\u2020", "sundial": "\u25d4", "topiary": "\u25cf",
+                  "maypole": "\u2695", "wagon_wheel": "\u2638", "trophy_cup": "\u03a5", "jack_o_lantern": "\u25d5", "ice_swan": "\u00a7", "festive_tree": "\u25b2"}
 FEST_NAMES = {"hoedown": "Spring Hoedown", "rodeo": "Rodeo Roundup", "fair": "Livestock Fair", "fallfest": "Fallfest",
               "derby": "Frost Fishing Derby", "feast": "Winter Feast"}
 BUILDING_C256 = {"store": 71, "saloon": 130, "hall": 124, "museum": 250, "clinic": 255, "smith": 243, "bakery": 218, "post": 74,
@@ -857,6 +858,11 @@ class Client:
                 it = W.ITEMS[key]
                 blink = curses.A_BOLD if (self.frame + x) % 6 < 4 else curses.A_DIM
                 self.put(oy + y - cam_y, ox + x - cam_x, self.g(("\u00a4", "*")), (P(C256.get(it["color"], 226), bgfn(x, y)) if rich else P(it["color"])) | blink)
+        hunt = st.get("hunt") if loc == "town" else None
+        for x, y in (hunt or {}).get("at", []):              # the festival hunt: things hidden around town
+            if cam_x <= x < cam_x + vw_eff and cam_y <= y < cam_y + vh_eff:
+                blink = curses.A_BOLD if (self.frame + x + y) % 8 < 6 else curses.A_DIM
+                self.put(oy + y - cam_y, ox + x - cam_x, self.g(("\u2727", "*")), (P(213, bgfn(x, y)) if rich else P("magenta")) | blink)
         for k in (st.get("digs") or {}).get(loc) or []:
             x, y = map(int, k.split(","))
             if cam_x <= x < cam_x + vw_eff and cam_y <= y < cam_y + vh_eff:

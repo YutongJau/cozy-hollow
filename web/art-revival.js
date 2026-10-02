@@ -243,6 +243,42 @@ const DECOR = {
     for (const [x, y] of [[19, 13], [11, 14], [18, 6], [21, 10]]) dot(g, x, y, "#357a2a");
   },
 };
+// festival-only decorations
+Object.assign(DECOR, {
+  maypole: (g) => {
+    ell(g, 16, 29, 8, 2, "rgba(0,0,0,0.25)"); px(g, 15, 3, 3, 27, PLANK.light); px(g, 15, 3, 1, 27, "#f0cf9a");
+    ell(g, 16, 3, 3, 2, "#f2c744"); for (let i = 0; i < 6; i++) { const c = ["#ff6b9d", "#7fd8e8", "#f2c744", "#a8f07a", "#c58aff", "#ff9c4a"][i]; for (let k = 0; k < 9; k++) dot(g, 16 + Math.round((i - 2.5) * k * 0.9), 5 + k * 2 + (i % 2), c); }
+    px(g, 11, 27, 11, 2, "#5fb04a"); dot(g, 12, 26, "#ff6b9d"); dot(g, 20, 26, "#ffe066");
+  },
+  wagon_wheel: (g) => {
+    ell(g, 16, 16, 12, 12, PLANK.dark); ell(g, 16, 16, 10, 10, "rgba(0,0,0,0)");
+    for (let a = 0; a < 6.28; a += 0.08) { dot(g, Math.round(16 + Math.cos(a) * 11), Math.round(16 + Math.sin(a) * 11), PLANK.mid); dot(g, Math.round(16 + Math.cos(a) * 12), Math.round(16 + Math.sin(a) * 12), PLANK.dark); }
+    for (let i = 0; i < 8; i++) { const a = i * 0.785; for (let r = 3; r < 11; r++) dot(g, Math.round(16 + Math.cos(a) * r), Math.round(16 + Math.sin(a) * r), PLANK.light); }
+    ell(g, 16, 16, 3, 3, "#5c5c62"); dot(g, 15, 15, "#9a9aa2"); px(g, 14, 27, 4, 4, PLANK.dark);
+  },
+  trophy_cup: (g) => {
+    ell(g, 16, 29, 7, 2, "rgba(0,0,0,0.25)"); px(g, 10, 26, 12, 4, PLANK.dark); px(g, 10, 26, 12, 1, PLANK.light); px(g, 12, 23, 8, 3, "#b08a20");
+    px(g, 15, 18, 2, 5, "#d9a640"); ell(g, 16, 11, 8, 8, "#d9a640"); ell(g, 15, 10, 7, 7, "#f2c744"); px(g, 9, 3, 14, 3, "#f2c744"); px(g, 9, 3, 14, 1, "#fff2a8");
+    px(g, 5, 6, 3, 8, "#d9a640"); px(g, 24, 6, 3, 8, "#d9a640"); px(g, 12, 8, 2, 6, "#fff2a8"); dot(g, 16, 12, "#e86a9a");
+  },
+  jack_o_lantern: (g) => {
+    ell(g, 16, 29, 9, 2, "rgba(0,0,0,0.25)"); ell(g, 16, 20, 12, 9, "#c4581e"); ell(g, 16, 19, 11, 8, "#f28c28"); for (const x of [10, 16, 22]) px(g, x, 12, 1, 15, "#d06a20");
+    px(g, 15, 8, 3, 5, "#5a7a2a"); px(g, 17, 7, 3, 2, "#5fb04a");
+    for (const [x, y] of [[10, 16], [19, 16]]) { px(g, x, y, 4, 3, "#ffd84a"); px(g, x + 1, y - 1, 2, 1, "#ffd84a"); }
+    px(g, 10, 23, 13, 2, "#ffd84a"); for (const x of [12, 16, 20]) px(g, x, 22, 2, 1, "#ffd84a");
+  },
+  ice_swan: (g) => {
+    ell(g, 16, 29, 9, 2, "rgba(0,0,0,0.2)"); px(g, 7, 25, 18, 5, "#b8e4f4"); px(g, 7, 25, 18, 1, "#e8f8ff");
+    ell(g, 17, 20, 9, 5, "#cdeefa"); ell(g, 15, 19, 6, 3, "#e8f8ff"); for (let i = 0; i < 12; i++) px(g, 9 + Math.round(Math.sin(i * 0.3) * 2), 18 - i, 3, 1, "#cdeefa");
+    px(g, 10, 5, 5, 3, "#cdeefa"); px(g, 14, 6, 3, 1, "#9fd0e8"); dot(g, 11, 6, "#5a8aa8"); px(g, 20, 15, 7, 4, "#e8f8ff"); dot(g, 24, 16, "#ffffff");
+  },
+  festive_tree: (g) => {
+    ell(g, 16, 29, 9, 2, "rgba(0,0,0,0.25)"); px(g, 14, 25, 4, 5, PLANK.dark); px(g, 11, 27, 10, 3, "#c94a3a");
+    for (let t = 0; t < 3; t++) for (let i = 0; i < 8; i++) { const w = 3 + i + t * 2, y = 4 + t * 7 + i; px(g, 16 - w, y, w * 2, 1, i % 3 === 0 ? "#3f8f3a" : "#2c6628"); }
+    for (const [x, y, c] of [[12, 10, "#e0524f"], [19, 13, "#f2c744"], [10, 18, "#7fd8e8"], [21, 20, "#e0524f"], [15, 22, "#f2c744"], [17, 16, "#c58aff"]]) { px(g, x, y, 2, 2, c); dot(g, x, y, "#ffffff"); }
+    px(g, 15, 1, 2, 4, "#f2c744"); px(g, 14, 2, 4, 2, "#f2c744"); dot(g, 15, 2, "#fff2a8");
+  },
+});
 const PROP_DECOR = { garden_bench: "b", lamp_post: "l" };
 function decorSprite(kind) {
   if (PROP_DECOR[kind]) return ART.propSprite(PROP_DECOR[kind]);
@@ -284,6 +320,15 @@ const ICONS = {
     px(g, 16, 18, 1, 6, "#b08a20"); px(g, 13, 19, 3, 1, "#b08a20"); px(g, 17, 18, 3, 1, "#b08a20"); dot(g, 12, 18, "#b08a20"); dot(g, 20, 17, "#b08a20");
   },
 };
+// the festival hunts: little things hidden around town
+Object.assign(ICONS, {
+  painted_egg: (g) => { ell(g, 16, 17, 8, 10, "#ff9cc6"); px(g, 9, 14, 15, 3, "#7fd8e8"); px(g, 9, 20, 15, 2, "#f2c744"); for (const x of [11, 15, 19]) dot(g, x, 15, "#ffffff"); ell(g, 13, 11, 2, 3, "#ffd0e8"); },
+  lucky_horseshoe: (g) => { for (let a = 0.5; a < 5.8; a += 0.05) { const x = Math.round(16 + Math.cos(a + 1.57) * 9), y = Math.round(15 - Math.sin(a + 1.57) * 10); px(g, x - 1, y - 1, 3, 3, "#9a9aa2"); dot(g, x, y - 1, "#d0d0d8"); } for (const [x, y] of [[9, 12], [23, 12], [8, 18], [24, 18]]) dot(g, x, y, "#3e3e44"); },
+  lost_rosette: (g) => { for (let a = 0; a < 6.28; a += 0.45) ell(g, Math.round(16 + Math.cos(a) * 7), Math.round(13 + Math.sin(a) * 7), 3, 3, "#e86a9a"); ell(g, 16, 13, 5, 5, "#f2c744"); ell(g, 16, 13, 3, 3, "#fff2a8"); px(g, 11, 19, 4, 10, "#e86a9a"); px(g, 17, 19, 4, 10, "#c94a7a"); },
+  candy_corn: (g) => { for (let y = 6; y < 27; y++) { const hw = Math.round((y - 4) * 0.42); px(g, 16 - hw, y, hw * 2 + 1, 1, y < 12 ? "#f4f1ea" : y < 19 ? "#f28c28" : "#f2c744"); } dot(g, 13, 14, "#ffc080"); },
+  lost_mitten: (g) => { px(g, 9, 9, 12, 15, "#d9463c"); ell(g, 15, 9, 6, 3, "#d9463c"); px(g, 21, 13, 3, 7, "#d9463c"); px(g, 22, 12, 2, 2, "#d9463c"); px(g, 9, 24, 13, 4, "#f4f1ea"); for (const x of [11, 15, 19]) px(g, x, 13, 2, 2, "#f4f1ea"); px(g, 10, 9, 11, 1, "#e86a5a"); },
+  glass_ornament: (g) => { px(g, 14, 4, 4, 4, "#d9a640"); px(g, 15, 2, 2, 2, "#b08a20"); ell(g, 16, 17, 10, 10, "#3a7bd5"); ell(g, 13, 13, 4, 4, "#8ab8f0"); dot(g, 12, 12, "#ffffff"); px(g, 7, 18, 19, 2, "#f2c744"); for (const x of [10, 16, 22]) dot(g, x, 22, "#ffffff"); },
+});
 const AGED = {   // aged in the cellar: the plain icon, dressed up (a wax seal, a ribbon, a glow)
   aged_cheese: ["cheese", (g) => { px(g, 3, 25, 26, 2, "#b0761e"); px(g, 9, 15, 3, 3, "#c4891e"); px(g, 18, 19, 4, 2, "#c4891e"); ell(g, 23, 12, 4, 4, "#a8242c"); dot(g, 22, 11, "#e86a6a"); }],
   vintage_jam: ["jam", (g) => { px(g, 9, 9, 14, 2, "#f2c744"); px(g, 14, 9, 4, 6, "#f2c744"); dot(g, 15, 15, "#b08a20"); px(g, 10, 16, 12, 10, "rgba(70,10,40,0.45)"); }],

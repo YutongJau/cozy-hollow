@@ -82,9 +82,17 @@ hot spring). One evening of play should afford one meaningful purchase, never ev
 - Town Hall: the Minecart Line (town, mine, beach) and the Hollow Observatory (twice the shooting stars, a telescope on
   Summit Ridge). The hot spring came with the Revival (M3). Tests: `python3 tests/test_economy.py`.
 
-## Milestone 6 - Festivals with depth
+## Milestone 6 - Festivals with depth (done)
 Two or three activities per festival, a shared farm score, villagers joining in with festival-day lines, and prizes worth
 winning (hats, decorations, rare seeds).
+- Every festival: its own event, a hunt for things hidden around town (painted eggs, lucky horseshoes, lost rosettes,
+  candy corn, lost mittens, glass ornaments) and Mayor Hazel's valley quiz (questions made from the valley itself: who
+  works where, who loves what, which season a crop grows in). The Winter Feast adds carols from your song book.
+- Everything earns festival points (your best counts for repeatable events); everyone's points make the farm's score:
+  Bronze 500g, Silver a decoration only that festival gives (Maypole, Wagon Wheel, Trophy Cup, Jack-o'-Lantern, Ice Swan,
+  Festive Tree), Gold rare starfruit seeds for everyone who joined in.
+- At midnight the day's top scorer wins that festival's hat (Bunny Ears, Rodeo Champion Hat, Rosette Hat, Witch Hat,
+  Earmuffs, Holly Crown). Villagers have lines for each festival. Tests: `python3 tests/test_festivals.py`.
 
 ## Milestone 7 - Collections and achievements
 Bundles in the spirit of Stardew's Community Center (a basket of spring forage, a fisherman's chest), a full
