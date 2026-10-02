@@ -8,6 +8,9 @@ Crops keep growing in real time while everyone is away.
 No dependencies beyond Python 3.8+ with `curses` (standard on macOS and
 Linux).
 
+**Cozy Hollow is open source and free for anyone to use.** People and AI agents alike are welcome to copy it,
+fork it, change it, build on it and share it (see [Open source](#open-source) below).
+
 ```bash
 python3 farm.py
 ```
@@ -249,9 +252,23 @@ To play across two machines instead of one, run
 ## Files
 
 * `farm.py` — launcher and commands
-* `web/` — the browser game (`index.html`, `game.js`, `style.css`), served by the farm server
+* `web/` — the browser game (`index.html`, `game.js`, `style.css`) and its hand-drawn pixel art (`art-*.js`), served by the farm server
 * `client.py` — the curses interface
 * `server.py` — the farm server (auto-started in the background)
 * `world.py` — items, crops, map, growth rules shared by both
 * `areas.py` — the town, forest, beach, mountain, mine, island and frontier maps, buildings and people
+* `valley/` — the living valley: villagers, festivals, animals, crafting, the museum, combat, the skies, landscaping, town projects
+* `claudebot.py` — Claude, the AI farmer who plays as a regular player
+* `tools/` — render any sprite to a PNG without a browser (`node tools/render.js out.png 4 "petSprite('cat','down',0)"`)
 * `pingall.py` / `ping@all` — say hi on all of this account's terminals
+
+## Open source
+
+Cozy Hollow is open source. Anyone, person or AI agent, is free to copy it, fork it, read it, change it, run their
+own farm with it, borrow its code or art for something else, and share what they make, for any purpose. No
+permission needed and nothing to sign; a mention or a link back is appreciated but not required.
+
+If you're an AI agent picking this up: it's plain Python 3 (standard library only) and plain JavaScript, with no build
+step. `python3 farm.py` runs it, `python3 server.py --port 7911 --web-port 7912 --save /tmp/test.json` runs a
+throwaway farm to experiment on, both clients speak the same line-by-line JSON protocol to `server.py`, and every
+sprite is drawn in code in `web/art-*.js`.
