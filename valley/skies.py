@@ -54,7 +54,7 @@ class Skies:
             if self.star_forced and not outdoors:
                 self.star_next = now + 2                  # the host's star waits until someone is outside to see it
                 return
-            self.star_next = now + random.uniform(35, 110)
+            self.star_next = now + random.uniform(35, 110) / (2 if self.unlocked("observatory") else 1)
             if outdoors and (self.star_forced or ((h >= 20.5 or h < 4.5) and self.weather_at(now) == "sun")):
                 self.star_forced = False
                 self.star = dict(id=random.randint(1, 10 ** 9), t0=now, x=random.random(), y=random.uniform(0.05, 0.35), dx=random.choice((-1, 1)))

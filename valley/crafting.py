@@ -3,6 +3,7 @@
 Machines sit on a tile like a sprinkler (traps out in the wild): load one with what it takes and come back later.
 """
 import random
+import time
 
 import areas as AR
 import world as W
@@ -325,6 +326,8 @@ class Crafting:
             self.fx(p, "lift", m["kind"], pos)
             self.dirty = True
             return self.say(p, "Picked up the %s." % name)
+        if MACHINES[m["kind"]].get("decor"):
+            return self.decor_use(p, m["kind"], now)
         if m["kind"] == "craft_table":
             return self.craft_menu(p)
         if m["kind"] == "tailor_table":
@@ -463,6 +466,7 @@ class Crafting:
             rows.append(dict(key=ck, label=name, info=self.needs_text(p, needs) + ("  ·  " + BUFFS[buff][0] if buff else ""),
                              act=dict(t="cook", r=ck), ok=ok, right="Cook" if ok else "%dg" % sell))
         rows.sort(key=lambda r: (bool(r.get("dim")), not r["ok"]))
+        rows += self.kitchen_rows(p, time.time())
         self.list_menu(p, "cook", "Kitchen", rows, sub="Cook something good. Eat it with U (or from your bag) for a boost.",
                        foot="Flour is sold at the Mercantile and the bakery.", keep=True)
 
@@ -478,7 +482,7 @@ class Crafting:
             return self.say(p, "You're missing something for the %s." % name, "warn")
         for want, c in needs:
             self.take_group(p, want, c)
-        self.give(p, ck, 1)
+        self.give(p, ck, self.cook_count())
         p["xp"] += 12
         self.bump(p, "cooked")
         self.say(p, "Cooked %s! It smells wonderful." % name, "good")
@@ -586,12 +590,16 @@ class Crafting:
             return self.say(p, "Not enough coins (need %dg)." % cost, "warn")
         if W.ITEMS[key]["kind"] in ("gear", "weapon") and self.count(p, key):
             return self.say(p, "You already have one.")
+        if sid == "decor" and (self.stage() < 2 or p.get("loc") != "carpenter"):
+            return self.say(p, "Oakley's furniture catalogue opens when the valley is Bustling.", "warn")
         if (key == "mystery_ticket" and not self.unlocked("harbor")) or (key == "shovel" and not self.unlocked("landscaping")):
             return self.say(p, "That needs a town project finished first (see the Town Hall).", "warn")
         self.coins -= cost
         self.give(p, key, n)
         self.bump(p, "spent", cost)
         self.say(p, "Bought %d %s for %dg." % (n, W.ITEMS[key]["name"], cost), "good")
+        if sid == "decor":
+            return self.carpenter_menu(p, now)
         self.shop_menu(p, sid)
 
     def carpenter_menu(self, p, now):
@@ -607,6 +615,7 @@ class Crafting:
             gated = key == "shovel" and not self.unlocked("landscaping")
             rows.append(dict(key=key, label=W.ITEMS[key]["name"], info="After the Landscaping Office project." if gated else self.item_info(key), right="%dg" % price,
                              act=dict(t="purchase", shop="oakley", item=key), ok=not gated and self.coins >= price))
+        rows += self.carpenter_rows(p, now)
         self.list_menu(p, "carpenter", "Oakley's Carpentry", rows, sub="Oakley · %dg shared" % self.coins, keep=True)
 
     def act_build_coop(self, p, msg, now):

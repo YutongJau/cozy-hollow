@@ -394,13 +394,14 @@ function updateHud() {
         const [k, n] = inv[i]; const it = catalog.items[k];
         const c = blank(32, 32); c.getContext("2d").drawImage(itemIcon(k, catalog), 0, 0); d.appendChild(c);
         if (n > 1 || !TOOLS.has(k)) { const num = document.createElement("span"); num.className = "n"; num.textContent = n; d.appendChild(num); }
-        d.title = (it ? it.name : k) + (it && it.verb ? " - " + it.verb : "");
+        const tier = me.tool_lv && me.tool_lv[k] ? ["", "Copper ", "Iron ", "Golden "][me.tool_lv[k]] : "";
+        d.title = tier + (it ? it.name : k) + (it && it.verb ? " - " + it.verb : "");
         d.onclick = () => send({ t: "select", i });
       }
       slots.appendChild(d);
     }
   }
-  if (me) $("#can-top").textContent = "Can " + me.water + "/" + catalog.can + " · Lv" + me.level;
+  if (me) $("#can-top").textContent = "Can " + me.water + "/" + (me.can_cap || catalog.can) + " · Lv" + me.level;
   if (me) { const bf = $("#buffs"), names = { speed: "\u26a1 Quick feet", luck: "\u2618 Lucky", angler: "\ud83c\udfa3 Steady hands", strength: "\u2694 Strong" }; bf.innerHTML = ""; for (const k in me.buffs || {}) bf.appendChild(el("span", null, names[k] + " " + fmt(me.buffs[k]))); }
   const rv = st.revival;
   if (rv) {   // the shared Valley Revival meter
@@ -694,6 +695,7 @@ function renderMenu(fresh) {
       "<p>Explore the valley: walk off the farm's paths west to <b>Hollow Town</b> (shops, saloon, museum, folks to talk to), north to <b>Summit Ridge</b> and its <b>mine</b> (break ore and gems with the pickaxe, ladders go deeper), south to the <b>Whisperwood</b>. From town go south to <b>Driftwood Beach</b>, where a boat at the pier sails to <b>Palm Isle</b>; the stagecoach in town rides to <b>Dusty Gulch</b>. Fish in rivers, lakes and the sea, and forage what each place grows.</p>" +
       "<p><b>Folks and festivals.</b> Villagers walk to work, the shops and home on the clock. Face one and press <kbd>E</kbd> to chat; press it again holding something to give it as a gift (everyone has favourites). On festival days the town square fills up: talk to Mayor Hazel for the line dance, the rodeo, the livestock fair, Fallfest, the fishing derby or the winter feast. The <b>Town Hall</b> takes donations for projects that grow the town and bring new neighbours.</p>" +
       "<p><b>Quests and levels.</b> A <b>!</b> over a villager means they have a favor to ask or a story to share; a <b>?</b> means you have what they asked for. <kbd>L</kbd> shows your quest log and what your next level unlocks. Levels open new seeds, saplings, recipes and deeper mine floors, and fruit trees grow only in the marked tree spots in the orchard meadow south of the fields - more spots open as you level.</p>" +
+      "<p><b>Things worth saving for.</b> Ingrid upgrades your hoe and watering can (they work a row, then a square); Oakley builds farm expansions, a farmhouse kitchen and cellar, a bigger coop and barn, and sells furniture once the valley is Bustling; the Town Hall has big projects like the Minecart Line and the Observatory. <code>/ledger</code> shows where the farm's coins come from and go.</p>" +
       "<p><b>The Valley Revival.</b> Everyone on the farm brings Cozy Hollow back to life together: town projects, the museum, friendships, festivals, shipping new kinds of crop and exploring all move the meter (side panel, or <kbd>K</kbd>). Each stage changes the town; the last one is the Valley Bloom Festival.</p>" +
       "<p><b>Making things.</b> <kbd>C</kbd> crafts at a crafting table (or anywhere with a toolbelt): machines like the cheese press, preserves jar, bee house and rock tumbler, animal traps, path stones and bridges. Cook at the farmhouse fireplace, and <kbd>U</kbd> eats what you hold for health and a little boost. The tailoring table sews hats.</p>" +
       "<p><b>Animals.</b> Oakley builds a coop once the town project is done; buy chickens at the seed shop and collect eggs. Adopt a dog or cat at the clinic and buy a horse in Dusty Gulch - <kbd>R</kbd> hops on.</p>" +
@@ -1021,6 +1023,8 @@ function renderFrame(now) {
     else if ("o$!fBchmlbwspg".includes(ch_)) { if (ch_ === "o" || ch_ === "l" || ch_ === "!" || ch_ === "g") ents.push({ y: y + 0.4, draw: () => ctx.drawImage(Art.propSprite(ch_), sx, sy, T, T) }); else ctx.drawImage(Art.propSprite(ch_), sx, sy, T, T); }
     else if (ch_ === "J" && town && rvs < 1) { const spr = Art.stallShut(); ents.push({ y: y + 0.4, draw: () => ctx.drawImage(spr, sx, sy, T, T) }); }
     else if ("ELIJOUD".includes(ch_)) { const spr = Art.areaProp(ch_, h); ents.push({ y: y + 0.4, draw: () => ctx.drawImage(spr, sx, sy, T, T) }); }
+    else if (ch_ === "X") ents.push({ y: y + 0.5, draw: () => ctx.drawImage(Art.minecartSprite(), sx, sy, T, T) });
+    else if (ch_ === "y") ents.push({ y: y + 0.5, draw: () => ctx.drawImage(Art.telescopeSprite(), sx, sy - 4 * SCALE, T, T) });
     else if (ch_ === "M") ents.push({ y: y + 0.7, draw: () => { ctx.drawImage(Art.monumentSprite(), sx - 8 * SCALE, sy - 52 * SCALE, 48 * SCALE, 72 * SCALE); } });
     else if (ch_ === "j") {
       if (cell(x - 1, y) !== "j" && cell(x, y - 1) !== "j") ctx.drawImage(Art.hotSpringSprite(waterFrame), sx - 4 * SCALE, sy - 8 * SCALE, 136 * SCALE, 80 * SCALE);   // the whole pool, from its top-left tile
@@ -1114,7 +1118,7 @@ function renderFrame(now) {
   const meP = myPlayer();
   if (meP) {
     const fx = meP.x + meP.facing[0], fy = meP.y + meP.facing[1], ft = cell(fx, fy), fd = (farm ? tiles : ATL)[fx + "," + fy] || {};
-    const hot = farm ? ("S$!+~wmBchblNspg.:".includes(ft) || fd.t || fd.g || chestAt(fx, fy)) : ("~!wmIEFJLOgVQUDBchbljM".includes(ft) || fd.g || fd.o || portals.has(loc + "," + fx + "," + fy));
+    const hot = farm ? ("S$!+~wmBchblNspg.:".includes(ft) || fd.t || fd.g || chestAt(fx, fy)) : ("~!wmIEFJLOgVQUDBchbljMXy".includes(ft) || fd.g || fd.o || portals.has(loc + "," + fx + "," + fy));
     if (hot) {
       ctx.strokeStyle = "rgba(255,250,200," + (0.35 + 0.3 * Math.sin(now / 200)) + ")"; ctx.lineWidth = SCALE;
       ctx.strokeRect(ox + fx * T + 2 * SCALE, oy + fy * T + 2 * SCALE, T - 4 * SCALE, T - 4 * SCALE);
@@ -1253,6 +1257,11 @@ function renderFrame(now) {
         glow(ox + x * T + T / 2, oy + y * T + 8 * SCALE, (quiet ? 2.4 : 3.6) * T, (quiet ? 0.35 : 0.55) * night * flick);
         ctx.fillStyle = "rgba(255,220,140," + 0.16 * night + ")"; ctx.beginPath(); ctx.ellipse(ox + x * T + T / 2, oy + y * T + T - 2 * SCALE, 1.6 * T, 0.7 * T, 0, 0, 6.3); ctx.fill();
       }
+    }
+    if (farm) for (const k in tiles) {   // lamp posts and stone lanterns from Oakley's catalogue light up the farm at night
+      const d = tiles[k]; if (!d.m || (d.m[0] !== "lamp_post" && d.m[0] !== "stone_lantern")) continue;
+      const [lx, ly] = k.split(",").map(Number); if (lx < x0 - 3 || lx > x1 + 3 || ly < y0 - 3 || ly > y1 + 3) continue;
+      glow(ox + lx * T + T / 2, oy + ly * T + (d.m[0] === "lamp_post" ? 8 : 14) * SCALE, (d.m[0] === "lamp_post" ? 3.2 : 2) * T, 0.5 * night);
     }
     if (town && rvs >= 3 && !state.festival) for (const [lx, ly, col] of lanternSpots(ox, oy, now)) {   // the paper lanterns light up after dark
       glow(lx, ly + 8 * SCALE, 1.5 * T, 0.5 * night);

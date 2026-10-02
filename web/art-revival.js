@@ -193,6 +193,88 @@ function lanternSprite(color, lit) {
   });
 }
 
+// ------------------------------------------------------------------ Oakley's furniture (each 32x32, standing on its tile)
+const DECOR = {
+  flower_planter: (g) => {
+    px(g, 4, 20, 24, 10, PLANK.mid); px(g, 4, 20, 24, 2, PLANK.light); px(g, 4, 28, 24, 2, PLANK.dark); for (const x of [10, 16, 22]) px(g, x, 22, 1, 6, PLANK.dark);
+    px(g, 6, 18, 20, 3, "#5a3a22");
+    [[8, 10, "#ff6b9d"], [13, 7, "#f2c744"], [18, 9, "#ffffff"], [23, 11, "#c58aff"], [11, 13, "#ff9c4a"], [20, 14, "#ff6b9d"]].forEach(([x, y, c]) => {
+      px(g, x, y + 2, 1, 18 - y, "#3f8f3a"); px(g, x + 1, y + 6, 2, 2, "#5fb04a"); px(g, x - 1, y - 1, 3, 3, c); dot(g, x, y, "#ffe066");
+    });
+  },
+  garden_gnome: (g) => {
+    ell(g, 16, 29, 7, 2, "rgba(0,0,0,0.25)");
+    px(g, 11, 22, 10, 7, "#3a7bd5"); px(g, 11, 22, 3, 7, "#5a9be8"); px(g, 10, 27, 5, 2, "#5a3a22"); px(g, 17, 27, 5, 2, "#5a3a22");
+    px(g, 12, 15, 8, 8, "#f4f1ea"); px(g, 13, 21, 6, 3, "#f4f1ea"); px(g, 14, 23, 4, 2, "#e8e2d6");
+    px(g, 12, 12, 8, 4, "#f2c49a"); dot(g, 14, 13, OUT); dot(g, 17, 13, OUT); px(g, 15, 14, 2, 2, "#e08a7a");
+    for (let i = 0; i < 9; i++) px(g, 12 + Math.floor(i / 2.5), 11 - i, 8 - Math.floor(i * 0.8), 1, i % 3 ? "#d9463c" : "#e0605a");
+    px(g, 7, 22, 4, 3, "#f2c49a"); px(g, 21, 21, 3, 4, "#f2c49a"); px(g, 23, 15, 1, 8, "#8a5a34"); px(g, 22, 13, 3, 3, "#c94a3a");
+  },
+  bird_bath: (g) => {
+    ell(g, 16, 29, 8, 2, "rgba(0,0,0,0.25)");
+    px(g, 11, 26, 10, 4, S.dark); px(g, 11, 26, 10, 1, S.light); px(g, 14, 14, 4, 12, S.mid); px(g, 14, 14, 1, 12, S.light); px(g, 17, 14, 1, 12, S.dark);
+    ell(g, 16, 12, 12, 4, S.dark); ell(g, 16, 11, 12, 3, S.light); ell(g, 16, 11, 10, 2, "#5aa6e0"); px(g, 10, 10, 4, 1, "#a9dcf7");
+    px(g, 22, 6, 5, 4, "#a8744a"); px(g, 21, 7, 2, 2, "#a8744a"); px(g, 26, 7, 2, 1, "#f2a33a"); dot(g, 24, 7, OUT); px(g, 22, 9, 4, 1, "#e8d2b0"); px(g, 23, 10, 1, 1, "#e8a030");
+  },
+  stone_lantern: (g) => {
+    ell(g, 16, 29, 8, 2, "rgba(0,0,0,0.25)");
+    px(g, 9, 26, 14, 4, S.dark); px(g, 9, 26, 14, 1, S.light); px(g, 13, 19, 6, 7, S.mid); px(g, 13, 19, 2, 7, S.light);
+    px(g, 10, 17, 12, 3, S.mid); px(g, 10, 17, 12, 1, S.hi); px(g, 11, 10, 10, 7, S.mid); px(g, 13, 11, 6, 5, "#ffd86a"); px(g, 14, 12, 2, 2, "#fff4c0");
+    px(g, 7, 7, 18, 3, S.dark); px(g, 7, 7, 18, 1, S.light); px(g, 10, 5, 12, 2, S.mid); px(g, 14, 2, 4, 3, S.light); dot(g, 15, 1, S.hi);
+  },
+  scarecrow: (g) => {
+    px(g, 15, 10, 2, 20, PLANK.dark); px(g, 5, 13, 22, 2, PLANK.mid);
+    px(g, 10, 13, 12, 9, "#c94a3a"); for (const x of [12, 16, 20]) px(g, x, 13, 1, 9, "#8a2c24"); px(g, 10, 17, 12, 1, "#8a2c24");
+    px(g, 4, 14, 3, 3, "#e3c478"); px(g, 25, 14, 3, 3, "#e3c478"); px(g, 12, 22, 3, 3, "#e3c478"); px(g, 17, 22, 3, 3, "#e3c478");
+    px(g, 12, 5, 8, 8, "#e6d3a0"); dot(g, 14, 8, OUT); dot(g, 17, 8, OUT); px(g, 14, 10, 4, 1, OUT);
+    px(g, 8, 4, 16, 2, "#d9b86a"); px(g, 11, 0, 10, 5, "#e3c478"); px(g, 11, 3, 10, 1, "#c94a5a");
+  },
+  sundial: (g) => {
+    ell(g, 16, 29, 8, 2, "rgba(0,0,0,0.25)");
+    px(g, 10, 25, 12, 5, S.dark); px(g, 10, 25, 12, 1, S.light); px(g, 12, 15, 8, 10, S.mid); px(g, 12, 15, 2, 10, S.light); px(g, 18, 15, 2, 10, S.dark);
+    ell(g, 16, 13, 11, 4, S.dark); ell(g, 16, 12, 11, 3, "#d9b86a"); ell(g, 16, 12, 9, 2, "#e8d08a");
+    for (const [x, y] of [[8, 12], [24, 12], [16, 10], [11, 10], [21, 10]]) dot(g, x, y, "#8a6a2a");
+    for (let i = 0; i < 6; i++) px(g, 13 + i, 11 - i, 2, 1, "#b08a20");
+  },
+  topiary: (g) => {
+    px(g, 10, 22, 12, 8, "#c96a3a"); px(g, 9, 21, 14, 2, "#e08a5a"); px(g, 10, 28, 12, 2, "#9a4a2a"); px(g, 12, 23, 2, 5, "#e08a5a");
+    px(g, 15, 17, 2, 5, "#6a4228");
+    ell(g, 16, 11, 9, 9, "#2f7a2a"); ell(g, 15, 10, 8, 8, "#4f9e3b"); ell(g, 13, 8, 4, 4, "#7ccf5a"); dot(g, 12, 6, "#a8e07a");
+    for (const [x, y] of [[19, 13], [11, 14], [18, 6], [21, 10]]) dot(g, x, y, "#357a2a");
+  },
+};
+const PROP_DECOR = { garden_bench: "b", lamp_post: "l" };
+function decorSprite(kind) {
+  if (PROP_DECOR[kind]) return ART.propSprite(PROP_DECOR[kind]);
+  if (!DECOR[kind]) return null;
+  return cached("rv:decor:" + kind, A, A, (g, c) => { DECOR[kind](g); outline(c, OUT); });
+}
+const prevMachine = ART.machineSprite;
+ART.machineSprite = function (kind, working) { return decorSprite(kind) || prevMachine(kind, working); };
+
+// ------------------------------------------------------------------ the minecart and the telescope
+function minecartSprite() {
+  return cached("rv:minecart", A, A, (g, c) => {
+    for (const y of [24, 29]) { px(g, 0, y, 32, 2, "#6c6964"); px(g, 0, y, 32, 1, "#a8a49c"); }
+    for (const x of [3, 11, 19, 27]) px(g, x, 23, 3, 9, PLANK.dark);
+    px(g, 5, 11, 22, 12, "#5c5c62"); px(g, 4, 10, 24, 3, "#8a8a92"); px(g, 4, 10, 24, 1, "#b0b0b8"); px(g, 5, 20, 22, 3, "#3e3e44");
+    for (const x of [8, 15, 22]) px(g, x, 13, 2, 7, "#3e3e44");
+    px(g, 7, 6, 6, 5, "#8b8e8c"); px(g, 12, 4, 7, 7, "#666a70"); px(g, 18, 6, 6, 5, "#8b8e8c"); dot(g, 14, 6, "#d0743a"); dot(g, 20, 7, "#f2c744");
+    for (const x of [9, 23]) { ell(g, x, 24, 3, 3, "#2d2d30"); dot(g, x, 24, "#9a9aa2"); }
+    outline(c, OUT);
+  });
+}
+function telescopeSprite() {
+  return cached("rv:telescope", A, A, (g, c) => {
+    px(g, 15, 18, 2, 12, PLANK.dark); px(g, 8, 28, 2, 3, PLANK.dark); px(g, 22, 28, 2, 3, PLANK.dark);
+    for (let i = 0; i < 10; i++) { dot(g, 15 - i * 0.7, 18 + i, PLANK.mid); dot(g, 16 + i * 0.7, 18 + i, PLANK.mid); }
+    for (let i = 0; i < 18; i++) px(g, 6 + i, 16 - Math.round(i * 0.55), 4, 4, i < 4 ? "#b08a20" : i % 5 === 0 ? "#f2e2a0" : "#d9a640");
+    px(g, 4, 15, 3, 5, "#8a6a20"); px(g, 24, 4, 4, 5, "#3a3a40"); dot(g, 26, 5, "#a8dcf7");
+    px(g, 14, 15, 4, 4, "#5a3a22");
+    outline(c, OUT);
+  });
+}
+
 // ------------------------------------------------------------------ icons for the things the Revival brings
 const ICONS = {
   valley_medal: (g) => {   // a gold medal on a pink and green ribbon, a sprout stamped in the middle
@@ -202,12 +284,20 @@ const ICONS = {
     px(g, 16, 18, 1, 6, "#b08a20"); px(g, 13, 19, 3, 1, "#b08a20"); px(g, 17, 18, 3, 1, "#b08a20"); dot(g, 12, 18, "#b08a20"); dot(g, 20, 17, "#b08a20");
   },
 };
+const AGED = {   // aged in the cellar: the plain icon, dressed up (a wax seal, a ribbon, a glow)
+  aged_cheese: ["cheese", (g) => { px(g, 3, 25, 26, 2, "#b0761e"); px(g, 9, 15, 3, 3, "#c4891e"); px(g, 18, 19, 4, 2, "#c4891e"); ell(g, 23, 12, 4, 4, "#a8242c"); dot(g, 22, 11, "#e86a6a"); }],
+  vintage_jam: ["jam", (g) => { px(g, 9, 9, 14, 2, "#f2c744"); px(g, 14, 9, 4, 6, "#f2c744"); dot(g, 15, 15, "#b08a20"); px(g, 10, 16, 12, 10, "rgba(70,10,40,0.45)"); }],
+  aged_pickles: ["pickles", (g) => { px(g, 9, 10, 14, 1, "#c9a66b"); px(g, 9, 13, 14, 1, "#c9a66b"); px(g, 10, 16, 12, 10, "rgba(20,50,10,0.4)"); }],
+  golden_honey: ["honey", (g) => { px(g, 9, 6, 14, 3, "#f2c744"); px(g, 9, 6, 14, 1, "#fff2a8"); dot(g, 25, 8, "#fff2a8"); dot(g, 26, 9, "#ffffff"); dot(g, 24, 9, "#fff2a8"); dot(g, 25, 10, "#fff2a8"); }],
+};
 const prevIconR = ART.iconCanvas;
 ART.iconCanvas = function (key, cat) {
-  if (!ICONS[key]) return prevIconR(key, cat);
-  return cached("rv:icon:" + key, A, A, (g, c) => { ICONS[key](g); outline(c, OUT); });
+  if (ICONS[key]) return cached("rv:icon:" + key, A, A, (g, c) => { ICONS[key](g); outline(c, OUT); });
+  if (AGED[key]) return cached("rv:icon:" + key, A, A, (g) => { g.drawImage(prevIconR(AGED[key][0], cat), 0, 0); AGED[key][1](g); });
+  const d = decorSprite(key);
+  return d || prevIconR(key, cat);
 };
 ART.REVIVAL_ICONS = ICONS;
 
-Object.assign(ART, { fountainDry, wiltedPlanter, weedSprite, boardsSprite, stallShut, springTile, hotSpringSprite, monumentSprite, lanternSprite });
+Object.assign(ART, { fountainDry, wiltedPlanter, weedSprite, boardsSprite, stallShut, springTile, hotSpringSprite, monumentSprite, lanternSprite, decorSprite, minecartSprite, telescopeSprite });
 })();

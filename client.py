@@ -47,6 +47,7 @@ AREA_GLYPHS = {
     "D": ("\u25bc", "v", 220, 233, "yellow", True), "I": ("\u2248", "~", 45, 94, "cyan", True), "J": ("\u25a0", "J", 203, None, "red", True),
     "O": ("o", "o", 137, None, "yellow", True), "Z": ("\u25a0", "Z", 178, None, "yellow", True),
     "j": ("\u2248", "~", 159, 30, "cyan", True), "M": ("\u2655", "M", 220, None, "yellow", True),
+    "X": ("\u2584", "X", 245, 240, "white", True), "y": ("\u2310", "y", 178, None, "yellow", True),
 }
 # the folk and creatures of the valley: (unicode, ascii, 256-colour fg, 8-colour fg)
 NPC_GLYPH = ("\u263a", "@")
@@ -62,7 +63,10 @@ MAP_AREA_C256 = {"farm": 136, "town": 144, "mountain": 101, "forest": 28, "beach
                  "mine1": 240, "mine2": 240, "mine3": 240}
 HEN_C256 = {"white": 255, "brown": 173, "black": 240}
 MACHINE_GLYPHS = {"cheese_press": "\u2565", "preserves_jar": "\u25d8", "mayo_machine": "\u25d9", "bee_house": "\u2591",
-                  "rock_tumbler": "\u25cd", "animal_trap": "\u2302", "craft_table": "\u2564", "tailor_table": "\u2566"}
+                  "rock_tumbler": "\u25cd", "animal_trap": "\u2302", "craft_table": "\u2564", "tailor_table": "\u2566",
+                  # Oakley's furniture
+                  "garden_bench": "\u2550", "flower_planter": "\u273f", "lamp_post": "\u00a1", "garden_gnome": "\u00a7", "bird_bath": "\u03a8",
+                  "stone_lantern": "\u2229", "scarecrow": "\u2020", "sundial": "\u25d4", "topiary": "\u25cf"}
 FEST_NAMES = {"hoedown": "Spring Hoedown", "rodeo": "Rodeo Roundup", "fair": "Livestock Fair", "fallfest": "Fallfest",
               "derby": "Frost Fishing Derby", "feast": "Winter Feast"}
 BUILDING_C256 = {"store": 71, "saloon": 130, "hall": 124, "museum": 250, "clinic": 255, "smith": 243, "bakery": 218, "post": 74,
@@ -1966,11 +1970,12 @@ class Client:
         y += 1
         if me:
             water = me["water"]
-            filled = int(round(10 * water / W.CAN_CAPACITY))
+            cap = me.get("can_cap") or W.CAN_CAPACITY
+            filled = int(round(10 * water / cap))
             bar = self.g(("█", "#")) * filled + self.g(("░", ".")) * (10 - filled)
             self.put(y, x0 + 1, "Can ", curses.A_BOLD)
             self.put(y, x0 + 5, bar, P("cyan") | curses.A_BOLD)
-            self.put(y, x0 + 16, "%d/%d" % (water, W.CAN_CAPACITY))
+            self.put(y, x0 + 16, "%d/%d" % (water, cap))
             y += 1
             nxt = me.get("next_xp")
             top = me["level"] >= W.MAX_LEVEL or nxt is None or me["xp"] >= nxt   # level 1000: nothing left to fill
@@ -2354,6 +2359,8 @@ class Client:
         ("N", "the valley map: every place and where everyone is. Father TongTong (by the chapel) gives you one."),
         ("L", "your quest log. ! over a villager: a favor or a story for you; ? : you have what they asked for."),
         ("K", "the Valley Book: the Valley Revival everyone works on together (five stages, six threads), and more."),
+        ("Upgrades", "Ingrid upgrades your hoe and can (a row, then a square); Oakley builds farm expansions, a kitchen and cellar, a "
+                     "bigger coop and barn, and sells furniture once the valley is Bustling. /ledger shows the farm's books."),
         ("Levels", "new seeds, saplings, recipes and deeper mine floors open as you level. Fruit trees grow only in the "
                    "tree spots (\u0166) in the orchard meadow south of the fields; more open as you level."),
         ("Villagers", "folks walk to work, the shops and home on the clock. E chats; E again while holding something gives it as a gift. "

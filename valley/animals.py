@@ -237,8 +237,8 @@ class Animals:
     def buy_chicken(self, p, now):
         if not self.has_coop():
             return self.say(p, "You'll need a coop first - Oakley the carpenter in town can build one.", "warn")
-        if len(self.chickens) >= MAX_CHICKENS:
-            return self.say(p, "The coop is full (%d chickens)." % MAX_CHICKENS, "warn")
+        if len(self.chickens) >= self.chicken_cap():
+            return self.say(p, "The coop is full (%d chickens). Oakley can build a bigger one." % self.chicken_cap(), "warn")
         if self.coins < CHICKEN_PRICE:
             return self.say(p, "Not enough coins (a chicken is %dg)." % CHICKEN_PRICE, "warn")
         spots = [(x, y) for y in range(YARD["y0"], YARD["y1"] + 1) for x in range(YARD["x0"], YARD["x1"] + 1)

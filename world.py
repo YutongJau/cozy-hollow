@@ -534,13 +534,13 @@ def catalog():
 # World
 # --------------------------------------------------------------------------
 # the feature modules: each registers its items when imported and adds a mixin to World
-from valley import crafting, animals, villagers, museum, festivals, skies, combat, landscape, townhall, progress, quests, revival, bloom, finale   # noqa: E402
-HOOKS = ["craft", "animals", "folk", "museum", "fest", "sky", "combat", "land", "town", "progress", "quests", "revival", "bloom", "finale"]
+from valley import crafting, animals, villagers, museum, festivals, skies, combat, landscape, townhall, progress, quests, revival, bloom, finale, economy   # noqa: E402
+HOOKS = ["craft", "animals", "folk", "museum", "fest", "sky", "combat", "land", "town", "progress", "quests", "revival", "bloom", "finale", "economy"]
 MAX_HP = 100
 
 
 class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Museum, festivals.Festivals, skies.Skies,
-            combat.Combat, landscape.Landscape, townhall.TownHall, progress.Progress, quests.Quests, revival.Revival, bloom.Bloom, finale.Finale):
+            combat.Combat, landscape.Landscape, townhall.TownHall, progress.Progress, quests.Quests, revival.Revival, bloom.Bloom, finale.Finale, economy.Economy):
     def _run(self, phase, *args):
         """Call every feature module's hook for this phase (init, load, save, tick, fast, snap, join, leave, pub, priv)."""
         for n in HOOKS:
@@ -1233,6 +1233,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
 
     def tick(self, now):
         self.out = []
+        self._coin_src = "tick"
         self.advance(self.last_tick, now)
         self.last_tick = now
         if self.quest is None or now - self.quest["since"] > QUEST_REFRESH:
@@ -1250,6 +1251,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         """A quick tick (4 a second) for things that move fast: monsters, critters, balloons, arrows."""
         self.out = []
         self.moved = False
+        self._coin_src = "fast"
         self._run("fast", now)
         return self.out
 
@@ -1325,7 +1327,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
 
     def intercept(self, p, loc, fx, fy, now):
         """E: the feature modules get the first look (a villager, an animal, a machine, a monster, a bug...)."""
-        for n in ("combat", "fest", "finale", "folk", "animals", "sky", "museum", "land", "craft", "town", "bloom"):
+        for n in ("combat", "fest", "finale", "folk", "animals", "sky", "museum", "land", "craft", "town", "bloom", "economy"):
             f = getattr(self, "_use_" + n, None)
             if f and f(p, loc, fx, fy, now):
                 return True
@@ -1508,6 +1510,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
             return self.out
         t = msg.get("t")
         handler = getattr(self, "act_" + str(t), None)
+        self._coin_src = str(t)            # the ledger files any coins this action moves under its name
         if handler is None:
             self.say(p, "Unknown action: %r" % (t,), "warn")
         else:
@@ -1670,6 +1673,8 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         if ftile.get("forage"):
             return self.pick_forage(p, fpos, ftile, now)
         targets = [fpos, pos]
+        if sel in ("hoe", "watering_can") and self.tool_area(p, sel):     # an upgraded tool works a whole row or square
+            return self.till_area(p, self.tool_area(p, sel), now) if sel == "hoe" else self.water_area(p, self.tool_area(p, sel), now)
         if sel == "hoe":
             for t in targets:
                 tl = self.tiles.get(t, {})
@@ -1814,6 +1819,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
                     dict(key="sword_iron", label="Forge an Iron Sword", info="6 iron ore and 300g.", act=dict(t="forge", item="sword_iron"), ok=self.count(p, "iron_ore") >= 6 and self.coins >= 300, right="Forge"),
                     dict(key="sword_gold", label="Forge a Golden Sword", info="6 gold ore and 800g.", act=dict(t="forge", item="sword_gold"), ok=self.count(p, "gold_ore") >= 6 and self.coins >= 800, right="Forge"),
                     dict(key="coal", label="Buy coal", info="20g a lump.", act=dict(t="forge", item="coal"), ok=self.coins >= 20, right="20g")]
+            rows += self.smith_rows(p)
             return self.list_menu(p, "smith", "Ingrid's Smithy", rows, sub=hi, keep=True)
         if loc == "fishshop":
             rows = [dict(key="mystery_ticket", label="Mystery Ticket", info="Sail to an island nobody's mapped. Different every time.", act=dict(t="purchase", shop="tomas", item="mystery_ticket"),
@@ -2108,9 +2114,9 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
     def refill(self, p, now):
         fx, fy = p["x"] + p["facing"][0], p["y"] + p["facing"][1]
         hint = " (F to fish!)" if self.terrain(fx, fy, p.get("loc", "farm")) == "~" else ""
-        if p["water"] >= CAN_CAPACITY:
+        if p["water"] >= self.can_cap(p):
             return self.say(p, "The watering can is already full." + hint)
-        p["water"] = CAN_CAPACITY
+        p["water"] = self.can_cap(p)
         self.dirty = True
         self.say(p, "Refilled the watering can." + hint)
 
@@ -2252,8 +2258,8 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         if cost > self.coins:
             return self.say(p, "Not enough coins (need %dg, have %dg)." % (cost, self.coins), "warn")
         if item == "cow":
-            if len(self.cows) >= MAX_COWS:
-                return self.say(p, "The pasture is full (%d cows)." % MAX_COWS, "warn")
+            if len(self.cows) >= self.cow_cap():
+                return self.say(p, "The pasture is full (%d cows). Oakley can build a bigger barn." % self.cow_cap(), "warn")
             occupied = {(q["x"], q["y"]) for q in self.players.values() if q.get("online") and q.get("loc", "farm") == "farm"}
             spots = [(x, y) for y in range(PASTURE["y0"] + 6, PASTURE["y1"] + 1) for x in range(PASTURE["x0"], PASTURE["x1"] + 1)
                      if self.in_pasture(x, y) and not self.cow_at(x, y) and not self.chest_at(x, y) and (x, y) not in occupied]
@@ -2470,9 +2476,11 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
             p["pet"]["name"] = name
             self.dirty = True
             return self.say(p, "Your %s is called %s now." % (p["pet"]["kind"], name), "good")
+        if cmd in ("/ledger", "/economy"):
+            return self.ledger_menu(p, now)
         if cmd == "/me":
             action = " ".join(parts[1:])
             return self.event("* %s %s" % (p["name"], action), now, "chat")
         if cmd == "/help":
-            return self.say(p, "Commands: /ping@all [msg], /look boy|girl, /hat on|off, /color <shirt>, /farm <name>, /give <player> <item> [n], /me <action>, /petname <name>")
+            return self.say(p, "Commands: /ping@all [msg], /look boy|girl, /hat on|off, /color <shirt>, /farm <name>, /give <player> <item> [n], /me <action>, /petname <name>, /ledger")
         self.say(p, "Unknown command %s. Try /help." % cmd, "warn")

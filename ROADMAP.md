@@ -68,11 +68,19 @@ farmer's name, credits listing what each person did, and rewards nobody can get 
 - Mayor Hazel gives each farmer the Bloom Crown and the Valley Medal (also later, for anyone who missed the day).
 - The valley's blessing: crops grow 10% faster from then on. Tests: `python3 tests/test_finale.py`.
 
-## Milestone 5 - Coins that matter
+## Milestone 5 - Coins that matter (done)
 A rebalance from real data (an economy log of coins in and out by source), and things worth saving for: farm expansions,
 farmhouse upgrades (kitchen, cellar for aging cheese), coop and barn upgrades, a furniture and decoration shop, tool
 upgrades at Ingrid's forge (a can or hoe that works on several tiles), and big town projects (a bridge to a new area, a
 hot spring). One evening of play should afford one meaningful purchase, never everything.
+- The ledger records every coin in and out of the shared purse by the action that moved it (`/ledger`, or K).
+- Ingrid: copper, iron and golden hoes and cans (1500g / 4000g / 10000g plus 5 ore): 3 tiles, 5 tiles, then a 3x3
+  square; the can holds 40, 60, then 100.
+- Oakley: three farm expansions (2500g, 6000g, 12000g), a farmhouse kitchen (every dish comes out as two) and cellar
+  (six casks: aged cheese, vintage jam, aged pickles, golden honey), a Big Coop (20 chickens) and Big Barn (12 cows), and
+  a furniture catalogue of nine decorations once the valley is Bustling (lamp posts and stone lanterns light up at night).
+- Town Hall: the Minecart Line (town, mine, beach) and the Hollow Observatory (twice the shooting stars, a telescope on
+  Summit Ridge). The hot spring came with the Revival (M3). Tests: `python3 tests/test_economy.py`.
 
 ## Milestone 6 - Festivals with depth
 Two or three activities per festival, a shared farm score, villagers joining in with festival-day lines, and prizes worth

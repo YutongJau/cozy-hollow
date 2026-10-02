@@ -107,6 +107,7 @@ class TownHall:
         if key == "bandstand":
             for (x, y) in [(34, 21), (38, 21)]:
                 self.set_terrain("town", x, y, "l")
+        self.project_done(key, p, now)
         self.bump(p, "projects")
         self.event("The town finished the %s! %s Population: %d." % (title, does, self.population()), now, "good")
         self.check_milestones(now)
