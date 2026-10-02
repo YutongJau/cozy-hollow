@@ -46,6 +46,7 @@ AREA_GLYPHS = {
     "V": ("\u2584", "v", 137, 25, "yellow", True), "Q": ("\u2584", "Q", 196, None, "red", True), "U": ("H", "H", 220, 236, "yellow", True),
     "D": ("\u25bc", "v", 220, 233, "yellow", True), "I": ("\u2248", "~", 45, 94, "cyan", True), "J": ("\u25a0", "J", 203, None, "red", True),
     "O": ("o", "o", 137, None, "yellow", True), "Z": ("\u25a0", "Z", 178, None, "yellow", True),
+    "j": ("\u2248", "~", 159, 30, "cyan", True),
 }
 # the folk and creatures of the valley: (unicode, ascii, 256-colour fg, 8-colour fg)
 NPC_GLYPH = ("\u263a", "@")
@@ -1691,6 +1692,7 @@ class Client:
                 for xx in range(b["x"], b["x"] + b["w"]):
                     bcol[(xx, yy)] = b
         fx, fy = (me["x"] + me["facing"][0], me["y"] + me["facing"][1]) if me else (-1, -1)
+        rvs = (st.get("revival") or {}).get("stage", 0) if loc == "town" else 9     # a quiet town looks worn (see the Valley Revival)
         for sy in range(vh_eff):
             y = cam_y + sy
             for sx in range(vw_eff):
@@ -1698,7 +1700,15 @@ class Client:
                 ch = rows[y][x]
                 hsh = (x * 73856093 ^ y * 19349663) & 0xFFFF
                 d = tiles.get("%d,%d" % (x, y))
-                if d and d.get("m"):
+                if rvs < 1 and ch in ".=" and ((x * 3 + 1) * 7 + (y * 7 + 2) * 13) % 11 == 0:
+                    gl, attr = self.g(("\u03c8", "w")), (P(64, gbg if ch == "." else 245) if rich else P("green"))
+                elif rvs < 1 and ch == "f":
+                    gl, attr = self.g(("\u0192", "f")), (P(137, gbg) if rich else P("yellow")) | curses.A_DIM
+                elif rvs < 1 and ch == "J":
+                    gl, attr = self.g(("\u25a1", "J")), (P(244) if rich else P("white")) | curses.A_DIM
+                elif rvs < 2 and ch == "F":
+                    gl, attr = self.g(("\u25cb", "o")), (P(248, 245) if rich else P("white")) | curses.A_DIM
+                elif d and d.get("m"):
                     gl, attr = self.machine_cell(d["m"], gbg)
                 elif d and d.get("o"):
                     gl, attr = self.g(("\u25cf", "o")), (P(ORE_C256.get(d["o"], 250), gbg) if rich else P("white")) | B

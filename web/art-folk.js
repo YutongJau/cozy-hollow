@@ -26,12 +26,14 @@ Object.assign(LOOKS, {
   "Theo": { body: "boy", skin: "brown", hair: "black", style: "curly", shirt: "#3ab8c8", pants: "denim", hat: "bandana", hatColor: "#d9463c" },
   "Ivy": { body: "girl", skin: "brown", hair: "teal", style: "long", shirt: "#3ab8a8", skirt: "#2a8a80", apron: false, bow: "#f2c744" },
   "Rowan": { body: "boy", head: "girl", skin: "light", hair: "chestnut", style: "long", shirt: "#c84ab0", bib: false, pants: "brown", vest: "#4a7a3a", beard: "goatee", extras: ["belt"] },
+  "Fennel": { body: "girl", skin: "tan", hair: "ginger", style: "ponytail", shirt: "#f2e2b8", skirt: "#5a8a3a", apron: "#c96a3a", hat: "straw", extras: ["scarf"], scarf: "#7ab84a" },
   "Velvet": { body: "girl", skin: "fair", hair: "platinum", style: "bob", shirt: "#6a2a6a", skirt: "#4a1a4a", apron: false, extras: ["necklace"], hat: "tophat", hatColor: "#2b2a33", hatBand: "#c94a8a" },
   // ---- the beach, the woods, the ridge
   "Old Tomas": { body: "boy", skin: "tan", hair: "white", style: "bald", shirt: "#2e4a7a", bib: false, pants: "navy", beard: "full", beardColor: "white", hat: "beanie", hatColor: "#2a3a5a", hatBand: "#c94a4a" },
   "Wren": { body: "girl", skin: "light", hair: "ginger", style: "bob", shirt: "#f4f1ea", skirt: "#2e4a7a", apron: false, extras: ["scarf"], scarf: "#d9463c" },
   "Ranger Moss": { body: "boy", skin: "tan", hair: "brown", shirt: "#7a8a4a", bib: false, pants: "olive", beard: "mustache", hat: "ranger", hatColor: "#8a7a4a", hatBand: "#4a5a2a", extras: ["badge", "belt"] },
   "Captain Ash": { body: "boy", head: "girl", skin: "light", hair: "silver", style: "ponytail", shirt: "#d0c8b8", bib: false, pants: "black", coat: "#2e3a5e", eyepatch: true, boots: "#2a2228", bow: "#c94a4a" },
+  "Sol": { body: "boy", skin: "brown", hair: "black", style: "long", shirt: "#e9e2d0", bib: false, pants: "khaki", coat: "#d9783a", beard: "goatee", extras: ["scarf"], scarf: "#f2c744" },
   "Coco": { body: "girl", skin: "deep", hair: "black", style: "curly", shirt: "#ff7eb6", skirt: "#f2c744", apron: false, hat: "flower", extras: ["lei"] },
   // ---- Dusty Gulch
   "Dolly": { body: "girl", skin: "fair", hair: "blonde", style: "long", shirt: "#d64fbf", skirt: "#a8329a", apron: false, hat: "cowboy", hatColor: "#f4efe4", hatBand: "#d64fbf" },

@@ -922,6 +922,7 @@ function renderFrame(now) {
   const loc = curLoc();
   if (!isOutdoor(loc)) { renderInterior(now, dt); return; }
   const M = curMap(), farm = loc === "farm", ATL = areaTiles(loc), cave = /^mine/.test(loc), base = AREA_BASE[loc];
+  const rvs = (state.revival || {}).stage || 0, town = loc === "town";   // the Valley Revival stage: the town looks worn until it wakes
   RM = M; RG = groundOf(M);
   const cell = (x, y) => (M[y] || "")[x] || "#", gcell = (x, y) => (RG[y] || [])[x] || "#";
   const cw = Math.floor(canvas.clientWidth * dpr), ch = Math.floor(canvas.clientHeight * dpr);
@@ -1016,8 +1017,15 @@ function renderFrame(now) {
       const mask = (conn(0, -1) ? 1 : 0) | (conn(1, 0) ? 2 : 0) | (conn(0, 1) ? 4 : 0) | (conn(-1, 0) ? 8 : 0);
       ctx.drawImage(ch_ === "#" ? Art.fenceSprite(mask) : Art.gateSprite(!!(mask & 5)), sx, sy, T, T);
     }
+    else if (ch_ === "f" && town && rvs < 1) ctx.drawImage(Art.wiltedPlanter(), sx, sy, T, T);
     else if ("o$!fBchmlbwspg".includes(ch_)) { if (ch_ === "o" || ch_ === "l" || ch_ === "!" || ch_ === "g") ents.push({ y: y + 0.4, draw: () => ctx.drawImage(Art.propSprite(ch_), sx, sy, T, T) }); else ctx.drawImage(Art.propSprite(ch_), sx, sy, T, T); }
+    else if (ch_ === "J" && town && rvs < 1) { const spr = Art.stallShut(); ents.push({ y: y + 0.4, draw: () => ctx.drawImage(spr, sx, sy, T, T) }); }
     else if ("ELIJOUD".includes(ch_)) { const spr = Art.areaProp(ch_, h); ents.push({ y: y + 0.4, draw: () => ctx.drawImage(spr, sx, sy, T, T) }); }
+    else if (ch_ === "j") {
+      if (cell(x - 1, y) !== "j" && cell(x, y - 1) !== "j") ctx.drawImage(Art.hotSpringSprite(waterFrame), sx - 4 * SCALE, sy - 8 * SCALE, 136 * SCALE, 80 * SCALE);   // the whole pool, from its top-left tile
+      ents.push({ y: y + 0.1, draw: () => steam(sx, sy, now, h) });
+    }
+    else if (town && rvs < 1 && (ch_ === "." || ch_ === "=") && hash(x * 3 + 1, y * 7 + 2) % 11 === 0 && !(state.npcs || []).some((n) => n.loc === loc && n.x === x && n.y === y)) ctx.drawImage(Art.weedSprite(h % 6), sx, sy, T, T);
     else if (ch_ === "u") ents.push({ y: y + 0.4, draw: () => { ctx.fillStyle = "rgba(0,0,0,.15)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, sy + T - 3 * SCALE, 12 * SCALE, 4 * SCALE, 0, 0, 6.3); ctx.fill(); ctx.drawImage(Art.propSprite("u"), sx, sy - 4 * SCALE, T, T); } });
     else if (ch_ === "Y") ents.push({ y: y + 0.9, draw: () => { ctx.fillStyle = "rgba(0,0,0,.22)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, sy + T - 2 * SCALE, 11 * SCALE, 4 * SCALE, 0, 0, 6.3); ctx.fill(); ctx.drawImage(Art.priestSprite(Math.floor(now / 700) % 2), sx, sy - 16 * SCALE, T, 48 * SCALE); } });
     else if (ch_ === "~" && h % 9 === 0 && cell(x, y - 1) === "~" && cell(x, y + 1) === "~" && cell(x - 1, y) === "~" && cell(x + 1, y) === "~" && isType(x, y - 1, "~") && isType(x, y + 1, "~") && isType(x - 1, y, "~") && isType(x + 1, y, "~") && !(loc === "beach" || loc === "island")) ctx.drawImage(Art.lilyPad(h % 4), sx, sy, T, T);
@@ -1029,7 +1037,7 @@ function renderFrame(now) {
     else if (ch_ === "P") ents.push({ y: y + 0.5, big: Art.pineSprite(season, h % 8), sx, sy });
     else if (ch_ === "A") ents.push({ y: y + 0.5, palm: Art.palmSprite(h % 6), sx, sy });
     else if (ch_ === "K") ents.push({ y: y + 0.5, draw: () => { ctx.fillStyle = "rgba(0,0,0,.18)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, sy + T - 3 * SCALE, 10 * SCALE, 3 * SCALE, 0, 0, 6.3); ctx.fill(); ctx.drawImage(Art.cactusSprite(h % 6), sx, sy - 16 * SCALE, T, 48 * SCALE); } });
-    else if (ch_ === "F" && cell(x - 1, y) !== "F" && cell(x, y - 1) !== "F") ents.push({ y: y + 1.5, draw: () => ctx.drawImage(Art.fountainSprite(Math.floor(now / 220) % 3), sx, sy - 16 * SCALE, 3 * T, 80 * SCALE / 1) });
+    else if (ch_ === "F" && cell(x - 1, y) !== "F" && cell(x, y - 1) !== "F") ents.push({ y: y + 1.5, draw: () => ctx.drawImage(town && rvs < 2 ? Art.fountainDry() : Art.fountainSprite(Math.floor(now / 220) % 3), sx, sy - 16 * SCALE, 3 * T, 80 * SCALE / 1) });
     else if (ch_ === "Q" && cell(x - 1, y) !== "Q" && cell(x, y - 1) !== "Q") ents.push({ y: y + 1.6, draw: () => ctx.drawImage(Art.coachSprite(), sx, sy - 16 * SCALE, 3 * T, 80 * SCALE) });
     else if (ch_ === "V" && cell(x - 1, y) !== "V") ctx.drawImage(Art.boatSprite(), sx, sy + Math.round(Math.sin(now / 600) * SCALE), 2 * T, T);
     if (d) {
@@ -1075,6 +1083,7 @@ function renderFrame(now) {
     ents.push({ y: v.y + 0.85, draw: () => drawSide(Art.critterSprite(c.k, v.moving ? Math.floor(now / 140) % 2 : 0), v.x, v.y, c.f, ox, oy, big ? 48 * SCALE : T, big ? -12 : c.k === "rabbit" ? 3 : 2, big ? -8 : 0) });
   }
   if (loc === "town" && state.festival) festivalDecor(state.festival, ents, ox, oy, now);
+  else if (town && rvs >= 2) revivalDecor(rvs, ents, ox, oy, now, nightAlpha());
   // 3. buildings: shadows, the farmhouse porch and smoke, then the sprites as depth-sorted entities
   const blds = farm ? buildings.concat(extraBuildings("farm")) : areaBuildings(loc);
   for (const b of blds) {
@@ -1091,7 +1100,11 @@ function renderFrame(now) {
     }
     const w = b.x1 - b.x0 + 1, hh = b.y1 - b.y0 + 1;
     const spr = farm && "WSN".includes(b.kind) ? Art.buildingSprite(b.kind, w, hh, night > 0.2) : Art.areaBuilding(b.kind, w, hh, night > 0.2, b.label, season);
-    ents.push({ y: b.y1 + 0.6, draw: () => ctx.drawImage(spr, ox + b.x0 * T - Art.OV * SCALE, oy + b.y0 * T - Art.TOPPAD * SCALE, w * T + 2 * Art.OV * SCALE, hh * T + Art.TOPPAD * SCALE) });
+    const boarded = town && rvs < 2 ? boardedWindows(b) : [];
+    ents.push({ y: b.y1 + 0.6, draw: () => {
+      ctx.drawImage(spr, ox + b.x0 * T - Art.OV * SCALE, oy + b.y0 * T - Art.TOPPAD * SCALE, w * T + 2 * Art.OV * SCALE, hh * T + Art.TOPPAD * SCALE);
+      for (const [wx, wy] of boarded) ctx.drawImage(Art.boardsSprite(), ox + (b.x0 + wx) * T - 10 * SCALE, oy + (b.y0 + wy) * T - 9 * SCALE, 20 * SCALE, 18 * SCALE);
+    } });
   }
   for (const sm of smoke) { sm.y -= 0.35 * dt; sm.x += sm.vx * dt; sm.a -= 0.1 * dt; sm.r += 1.4 * dt; }
   smoke = smoke.filter((sm) => sm.a > 0);
@@ -1100,7 +1113,7 @@ function renderFrame(now) {
   const meP = myPlayer();
   if (meP) {
     const fx = meP.x + meP.facing[0], fy = meP.y + meP.facing[1], ft = cell(fx, fy), fd = (farm ? tiles : ATL)[fx + "," + fy] || {};
-    const hot = farm ? ("S$!+~wmBchblNspg.:".includes(ft) || fd.t || fd.g || chestAt(fx, fy)) : ("~!wmIEFJLOgVQUDBchbl".includes(ft) || fd.g || fd.o || portals.has(loc + "," + fx + "," + fy));
+    const hot = farm ? ("S$!+~wmBchblNspg.:".includes(ft) || fd.t || fd.g || chestAt(fx, fy)) : ("~!wmIEFJLOgVQUDBchblj".includes(ft) || fd.g || fd.o || portals.has(loc + "," + fx + "," + fy));
     if (hot) {
       ctx.strokeStyle = "rgba(255,250,200," + (0.35 + 0.3 * Math.sin(now / 200)) + ")"; ctx.lineWidth = SCALE;
       ctx.strokeRect(ox + fx * T + 2 * SCALE, oy + fy * T + 2 * SCALE, T - 4 * SCALE, T - 4 * SCALE);
@@ -1233,10 +1246,17 @@ function renderFrame(now) {
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       const ch_ = M[y][x];
       if (ch_ === "l") {
-        const flick = 0.85 + 0.15 * Math.sin(now / 90 + x * 3 + y);
-        glow(ox + x * T + T / 2, oy + y * T + 8 * SCALE, 3.6 * T, 0.55 * night * flick);
+        const quiet = town && rvs < 1, h2 = hash(x, y);
+        if (quiet && h2 % 3 === 0) continue;                       // a few lamps have gone out
+        const flick = quiet ? 0.55 + 0.45 * Math.max(0, Math.sin(now / 70 + x * 5) * Math.sin(now / 230 + y)) : 0.85 + 0.15 * Math.sin(now / 90 + x * 3 + y);
+        glow(ox + x * T + T / 2, oy + y * T + 8 * SCALE, (quiet ? 2.4 : 3.6) * T, (quiet ? 0.35 : 0.55) * night * flick);
         ctx.fillStyle = "rgba(255,220,140," + 0.16 * night + ")"; ctx.beginPath(); ctx.ellipse(ox + x * T + T / 2, oy + y * T + T - 2 * SCALE, 1.6 * T, 0.7 * T, 0, 0, 6.3); ctx.fill();
       }
+    }
+    if (town && rvs >= 3 && !state.festival) for (const [lx, ly, col] of lanternSpots(ox, oy, now)) {   // the paper lanterns light up after dark
+      glow(lx, ly + 8 * SCALE, 1.5 * T, 0.5 * night);
+      const op = ctx.globalCompositeOperation; ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = Math.min(1, night * 1.5);
+      ctx.drawImage(Art.lanternSprite(col, true), lx - 6 * SCALE, ly, 12 * SCALE, 16 * SCALE); ctx.globalAlpha = 1; ctx.globalCompositeOperation = op;
     }
     for (const b of blds) {
       if (farm && "WSN".includes(b.kind)) {
@@ -1248,7 +1268,7 @@ function renderFrame(now) {
           ctx.fillStyle = "rgba(255,215,130," + 0.12 * night + ")";
           ctx.beginPath(); ctx.moveTo(gx - 10 * SCALE, oy + (b.y1 + 1) * T); ctx.lineTo(gx + 10 * SCALE, oy + (b.y1 + 1) * T); ctx.lineTo(gx + 22 * SCALE, oy + (b.y1 + 1) * T + 26 * SCALE); ctx.lineTo(gx - 22 * SCALE, oy + (b.y1 + 1) * T + 26 * SCALE); ctx.closePath(); ctx.fill();
         }
-      } else for (const [wx, wy] of Art.windowSpots(b.kind, b.x1 - b.x0 + 1, b.y1 - b.y0 + 1)) glow(ox + (b.x0 + wx) * T, oy + (b.y0 + wy) * T, 1.5 * T, 0.35 * night);
+      } else { const bw = town && rvs < 2 ? boardedWindows(b).map(String) : []; for (const [wx, wy] of Art.windowSpots(b.kind, b.x1 - b.x0 + 1, b.y1 - b.y0 + 1)) if (!bw.includes(String([wx, wy]))) glow(ox + (b.x0 + wx) * T, oy + (b.y0 + wy) * T, 1.5 * T, 0.35 * night); }
     }
     for (const p of state.players) { if (!p.online || (p.loc || "farm") !== loc) continue; const v = p.name === prefs.name ? my : viz[p.name]; if (v) glow(ox + v.x * T + T / 2, oy + v.y * T + T / 2, (cave ? 5.2 : 2.4) * T, (cave ? 0.6 : 0.22) * night); }
     if (cave) for (const k in ATL) { const t = ATL[k]; if (!t.o || !/amethyst|emerald|ruby|diamond|prismatic|quartz/.test(t.o)) continue; const [gx, gy] = k.split(",").map(Number); glow(ox + gx * T + T / 2, oy + gy * T + T / 2, 1.2 * T, 0.25 + 0.1 * Math.sin(now / 300 + gx)); }
@@ -1290,6 +1310,7 @@ function renderFrame(now) {
   if (cave || loc === "farm" || isArea(loc)) drawStars(cw, ch, now);
   if (now - hurtAt < 350) { ctx.fillStyle = "rgba(220,40,40," + (0.28 * (1 - (now - hurtAt) / 350)).toFixed(3) + ")"; ctx.fillRect(0, 0, cw, ch); }
   drawBanner(now, cw);
+  drawCeremony(now, cw, ch, dt);
   if (Math.floor(now / 1000) !== Math.floor((now - dt * 1000) / 1000)) $("#clock").textContent = skyLabel(hourNow());
 }
 const _areaBld = {};
@@ -1575,6 +1596,78 @@ function drawQuestMark(x, y, mark, now) {
   ctx.fillStyle = mark === "?" ? "#b8f0a0" : "#fff2a8"; ctx.fillRect(X, Y, w, 2 * SCALE);
   ctx.fillStyle = "#2b1f17"; ctx.font = "bold " + (11 * SCALE) + "px 'Pixelify Sans', sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.fillText(mark, x, Y + h / 2 + SCALE); ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+}
+const BOARD_KINDS = { post: 1, bakery: 0, museum: 2, saloon: 1, clinic: 0, cottage: 0, cottage3: 1 };
+function boardedWindows(b) {
+  /* a quiet town: one window boarded up on some of the buildings (mended when the valley is Bustling) */
+  if (!(b.kind in BOARD_KINDS)) return [];
+  const spots = Art.windowSpots(b.kind, b.x1 - b.x0 + 1, b.y1 - b.y0 + 1);
+  return spots.length ? [spots[BOARD_KINDS[b.kind] % spots.length]] : [];
+}
+function steam(sx, sy, now, h) {
+  /* wisps rising off the hot spring */
+  for (let i = 0; i < 2; i++) {
+    const t = ((now / 2600 + i * 0.5 + (h % 7) / 7) % 1), x = sx + T / 2 + Math.sin(t * 6 + h + i) * 5 * SCALE, y = sy + T / 2 - t * 26 * SCALE;
+    ctx.fillStyle = "rgba(255,255,255," + (0.45 * (1 - t)).toFixed(3) + ")"; ctx.beginPath(); ctx.arc(x, y, (3 + t * 5) * SCALE, 0, 6.3); ctx.fill();
+  }
+}
+function bunting(lines, cols, ents, ox, oy, now) {
+  for (const [[ax, ay], [bx, by]] of lines) {
+    const p0 = { x: ox + ax * T + T / 2, y: oy + ay * T - 6 * SCALE }, p1 = { x: ox + bx * T + T / 2, y: oy + by * T - 6 * SCALE };
+    const n = Math.max(4, Math.round(Math.hypot(p1.x - p0.x, p1.y - p0.y) / (0.8 * T))), sag = ax === bx ? 0 : 16 * SCALE;
+    ents.push({ y: Math.min(ay, by) - 0.2, draw: () => {
+      ctx.strokeStyle = "rgba(60,40,20,.9)"; ctx.lineWidth = SCALE; ctx.beginPath(); ctx.moveTo(p0.x, p0.y);
+      ctx.quadraticCurveTo((p0.x + p1.x) / 2, (p0.y + p1.y) / 2 + sag, p1.x, p1.y); ctx.stroke();
+      for (let i = 1; i < n; i++) {
+        const u = i / n, x = (1 - u) * (1 - u) * p0.x + 2 * (1 - u) * u * (p0.x + p1.x) / 2 + u * u * p1.x, y = (1 - u) * (1 - u) * p0.y + 2 * (1 - u) * u * ((p0.y + p1.y) / 2 + sag) + u * u * p1.y;
+        const sway = Math.sin(now / 400 + i) * SCALE;
+        ctx.fillStyle = cols[i % cols.length]; ctx.beginPath(); ctx.moveTo(x - 4 * SCALE, y); ctx.lineTo(x + 4 * SCALE, y); ctx.lineTo(x + sway, y + 8 * SCALE); ctx.closePath(); ctx.fill();
+      }
+    } });
+  }
+}
+function revivalDecor(stage, ents, ox, oy, now, night) {
+  /* Bustling: pastel bunting round the square. Thriving: paper lanterns across it that glow after dark. In Bloom: gold. */
+  const cols = stage >= 4 ? ["#f2c744", "#fff2a0", "#f29ac0"] : ["#f29ac0", "#fff2a0", "#9fe0c8", "#a8c8f0"];
+  bunting([[[27, 14], [45, 14]], [[27, 30], [45, 30]]], cols, ents, ox, oy, now);
+  if (stage < 3) return;
+  for (const [[ax, ay], [bx, by]] of LANTERN_LINES) {
+    const p0 = { x: ox + ax * T + T / 2, y: oy + ay * T - 10 * SCALE }, p1 = { x: ox + bx * T + T / 2, y: oy + by * T - 10 * SCALE }, sag = 12 * SCALE;
+    ents.push({ y: ay - 0.1, draw: () => {
+      ctx.strokeStyle = "rgba(60,40,20,.85)"; ctx.lineWidth = SCALE; ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.quadraticCurveTo((p0.x + p1.x) / 2, p0.y + sag, p1.x, p1.y); ctx.stroke();
+      for (const [lx, ly, col] of lanternSpots(ox, oy, now).filter((l) => l[3] === ay)) ctx.drawImage(Art.lanternSprite(col, false), lx - 6 * SCALE, ly, 12 * SCALE, 16 * SCALE);
+    } });
+  }
+}
+const LANTERN_LINES = [[[27, 22], [45, 22]], [[30, 18], [42, 18]]];
+function lanternSpots(ox, oy, now) {
+  /* where each paper lantern hangs on its string (screen x, y, colour, the string's row) */
+  const out = [];
+  for (const [[ax, ay], [bx, by]] of LANTERN_LINES) {
+    const p0 = { x: ox + ax * T + T / 2, y: oy + ay * T - 10 * SCALE }, p1 = { x: ox + bx * T + T / 2, y: oy + by * T - 10 * SCALE }, sag = 12 * SCALE, n = Math.round((bx - ax) / 2);
+    for (let i = 1; i < n; i++) {
+      const u = i / n, x = (1 - u) * (1 - u) * p0.x + 2 * (1 - u) * u * (p0.x + p1.x) / 2 + u * u * p1.x, y = (1 - u) * (1 - u) * p0.y + 2 * (1 - u) * u * (p0.y + sag) + u * u * p1.y;
+      out.push([x, y + Math.sin(now / 700 + i) * SCALE, ["red", "gold", "pink", "teal"][i % 4], ay]);
+    }
+  }
+  return out;
+}
+let cerPetals = [];
+function drawCeremony(now, cw, ch, dt) {
+  /* a stage-up: a banner for everyone and cerPetals drifting down for a few seconds */
+  const c = state.ceremony;
+  if (!c || c.t > 14) { cerPetals = []; return; }
+  const a = c.t < 0.6 ? c.t / 0.6 : c.t > 11 ? Math.max(0, (14 - c.t) / 3) : 1;
+  while (cerPetals.length < 70) cerPetals.push({ x: Math.random() * cw, y: -Math.random() * ch, p: Math.random() * 6.3, v: 30 + Math.random() * 40 });
+  ctx.save(); ctx.globalAlpha = a;
+  for (const pt of cerPetals) { ctx.fillStyle = ["#ff9cc6", "#ffd0e8", "#fff2a0", "#ffffff"][Math.floor(pt.p * 4) % 4]; ctx.fillRect(pt.x, pt.y, 3 * SCALE, 2 * SCALE); ctx.fillRect(pt.x + SCALE, pt.y - SCALE, SCALE, SCALE); pt.y += pt.v * dt * SCALE / 2; pt.x += Math.sin(now / 600 + pt.p) * 25 * dt; if (pt.y > ch) { pt.y = -10; pt.x = Math.random() * cw; } }
+  const text = "\u2740 The valley is " + c.name + "! \u2740";
+  ctx.font = "600 " + 13 * SCALE + "px 'Pixelify Sans', 'Trebuchet MS', sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const w = ctx.measureText(text).width + 30 * SCALE, h = 24 * SCALE, x = cw / 2 - w / 2, y = ch * 0.22;
+  ctx.fillStyle = "#3a2a1a"; ctx.fillRect(x - 2 * SCALE, y - 2 * SCALE, w + 4 * SCALE, h + 4 * SCALE);
+  ctx.fillStyle = "#fbeec8"; ctx.fillRect(x, y, w, h); ctx.fillStyle = "#e9a0c8"; ctx.fillRect(x, y + h - 2 * SCALE, w, 2 * SCALE);
+  ctx.fillStyle = "#6a2c48"; ctx.fillText(text, cw / 2, y + h / 2);
+  ctx.restore();
 }
 function festivalDecor(kind, ents, ox, oy, now) {
   /* the square dressed for the day: bunting between the corner lamps, a banner over the fountain, seasonal props */

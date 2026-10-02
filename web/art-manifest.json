@@ -9,5 +9,6 @@
   "art-interior.js",
   "art-world.js",
   "art-items.js",
-  "art-life.js"
+  "art-life.js",
+  "art-revival.js"
 ]

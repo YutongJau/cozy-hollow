@@ -49,7 +49,8 @@ FOLK = {
 }
 NEW_FOLK_LOOKS = {"Hank": ("boy", "red", "none"), "Mabel": ("girl", "green", "none"), "Granny Rose": ("girl", "white", "none"),
                   "Theo": ("boy", "cyan", "cowboy"), "Nell": ("girl", "orange", "none"), "Barnaby": ("boy", "blue", "none"),
-                  "Ivy": ("girl", "cyan", "none"), "Rowan": ("boy", "magenta", "cowboy"), "Velvet": ("girl", "magenta", "none")}
+                  "Ivy": ("girl", "cyan", "none"), "Rowan": ("boy", "magenta", "cowboy"), "Velvet": ("girl", "magenta", "none"),
+                  "Fennel": ("girl", "green", "none"), "Sol": ("boy", "orange", "none")}
 AR.NPCS.update(NEW_FOLK_LOOKS)
 FOLK_LINES = {
     "Hank": ["Bring me your game and I'll dress it. Clean cuts, fair trade.", "Venison stew tonight. Nothing like it."],
@@ -59,12 +60,18 @@ FOLK_LINES = {
     "Nell": ["Every lamp in town, lit by hand. It's a calling.", "Thank you for the new lampposts!"],
     "Barnaby": ["The guest cottage is so cosy. I might stay forever.", "Is it always this friendly round here?"],
     "Ivy": ["I came for the festivals and stayed for the pie.", "Have you seen the shooting stars from the beach?"],
+    "Fennel": ["The stall's open! Seeds for next season, and I'm always after one crop or another.", "I left when the valley went quiet. Look at it now!"],
+    "Sol": ["The spring's been waiting for someone to care about it again. Soak as long as you like.", "Steam, stone and stars. That's all a body needs."],
 }
 AR.KEEPER_LINES.update(FOLK_LINES)
 MORE_FOLK = {   # people who move in as the town grows (see townhall)
     "Nell": dict(home=None, haunts=TOWN_SPOTS, evening="plaza", loves=["coal", "honey"], likes=["#food"], hates=["seaweed"]),
     "Barnaby": dict(home=None, haunts=TOWN_SPOTS[6:], evening="saloon", loves=["chowder"], likes=["#fish"], hates=["coal"]),
     "Ivy": dict(home=None, haunts=TOWN_SPOTS[:10], evening="plaza", loves=["star_fragment", "fruit_salad"], likes=["#fruit"], hates=["stone"]),
+    # people who come back as the valley revives (see bloom)
+    "Fennel": dict(home=None, work_spot=("town", 35, 24), haunts=TOWN_SPOTS[:8], evening="plaza", loves=["blueberry", "sunflower"], likes=["#veg", "#fruit"], hates=["coal"]),
+    "Sol": dict(home=None, work_spot=("mountain", 50, 13), haunts=[("mountain", 50, 13), ("mountain", 44, 11), ("mountain", 52, 15)], evening=None,
+                loves=["ginger", "honey"], likes=["#forage", "#fruit"], hates=["slime_jelly"]),
 }
 GIFT_POINTS = dict(love=120, like=60, neutral=25, hate=-30)
 TALK_POINTS = 20
@@ -129,6 +136,8 @@ class Villagers:
     # ------------------------------------------------------------------ where everyone wants to be
     def work_spot(self, name):
         d = self.folk_def(name)
+        if d.get("work_spot"):
+            return tuple(d["work_spot"])
         loc = d.get("work")
         if not loc:
             return None
@@ -142,7 +151,7 @@ class Villagers:
         d = self.folk_def(name)
         if d.get("home"):
             return ("town",) + tuple(d["home"])
-        if d.get("work"):
+        if d.get("work") or d.get("work_spot"):
             return self.work_spot(name)
         return ("saloon", 7, 6)
 
@@ -151,6 +160,9 @@ class Villagers:
         d = self.folk_def(name)
         h = self.sky_hour(now)
         rng = random.Random(sh(name) ^ int(now // W.SKY_DAY))
+        cer = self.ceremony_spot(name, now) if hasattr(self, "ceremony_spot") else None
+        if cer:
+            return cer
         fest = self.festival_spot(name, now) if hasattr(self, "festival_spot") else None
         if fest and 8 <= h < 22:
             return fest
@@ -160,7 +172,7 @@ class Villagers:
         if 6 <= h < 8 or (12 <= h < 13.5):
             return haunts[int(h * 2 + rng.random() * 3) % len(haunts)]
         if 8 <= h < 18:
-            if d.get("work"):
+            if d.get("work") or d.get("work_spot"):
                 return self.work_spot(name)
             return haunts[int(h / 1.5 + rng.random() * 5) % len(haunts)]
         ev = d.get("evening")

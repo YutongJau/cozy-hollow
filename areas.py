@@ -26,7 +26,7 @@ TERRAIN_NAMES = {
     "=": "cobblestone", "H": "wooden planks", "r": "gravel", "v": "cave floor", "z": "desert sand",
     "P": "pine tree", "A": "palm tree", "K": "cactus", "C": "cliff", "R": "cave wall", "@": "building",
     "F": "fountain", "E": "gravestone", "L": "fallen log", "V": "boat", "Q": "stagecoach",
-    "U": "ladder up", "D": "ladder down", "I": "water trough", "J": "market stall", "O": "wagon",
+    "U": "ladder up", "D": "ladder down", "I": "water trough", "J": "market stall", "O": "wagon", "j": "hot spring",
 }
 PROP_LINES = {
     "F": "The fountain burbles. Someone tossed a coin in for luck.",

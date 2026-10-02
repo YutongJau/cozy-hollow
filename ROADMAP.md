@@ -47,9 +47,17 @@ progress has already earned.
   lists each goal, what the next stage brings, the crops shipped so far and the credits.
 - Tests: `python3 tests/test_revival.py`.
 
-## Milestone 3 - The world reacts
+## Milestone 3 - The world reacts (done)
 Early stages look a little worn (boarded windows, weeds, a dry fountain, dim lamps). Each stage-up brings visible change:
 new neighbours, a shop reopening, decorations, a new area or activity, and a ceremony with Mayor Hazel.
+- Quiet: weeds in the cobbles, wilted planters, a dry fountain full of leaves, boarded windows, flickering lamps (some
+  out), a shuttered market stall.
+- Waking: Fennel comes back and reopens the market stall (next season's seeds; she pays double for one crop each day).
+- Bustling: the fountain flows again (toss in 10g once a day for luck), pastel bunting over the square, windows mended.
+- Thriving: Sol restores the old hot spring above the mountain lake (a soak heals you and quickens your step); paper
+  lanterns over the square glow after dark.
+- Every stage-up: a banner and petals for everyone online, and Mayor Hazel speaks by the fountain while the townsfolk
+  gather round. Tests: `python3 tests/test_bloom.py`.
 
 ## Milestone 4 - The finale
 Reaching In Bloom starts the Valley Bloom Festival: every villager in the square, fireworks, a monument with every

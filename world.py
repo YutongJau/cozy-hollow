@@ -534,13 +534,13 @@ def catalog():
 # World
 # --------------------------------------------------------------------------
 # the feature modules: each registers its items when imported and adds a mixin to World
-from valley import crafting, animals, villagers, museum, festivals, skies, combat, landscape, townhall, progress, quests, revival   # noqa: E402
-HOOKS = ["craft", "animals", "folk", "museum", "fest", "sky", "combat", "land", "town", "progress", "quests", "revival"]
+from valley import crafting, animals, villagers, museum, festivals, skies, combat, landscape, townhall, progress, quests, revival, bloom   # noqa: E402
+HOOKS = ["craft", "animals", "folk", "museum", "fest", "sky", "combat", "land", "town", "progress", "quests", "revival", "bloom"]
 MAX_HP = 100
 
 
 class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Museum, festivals.Festivals, skies.Skies,
-            combat.Combat, landscape.Landscape, townhall.TownHall, progress.Progress, quests.Quests, revival.Revival):
+            combat.Combat, landscape.Landscape, townhall.TownHall, progress.Progress, quests.Quests, revival.Revival, bloom.Bloom):
     def _run(self, phase, *args):
         """Call every feature module's hook for this phase (init, load, save, tick, fast, snap, join, leave, pub, priv)."""
         for n in HOOKS:
@@ -1325,7 +1325,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
 
     def intercept(self, p, loc, fx, fy, now):
         """E: the feature modules get the first look (a villager, an animal, a machine, a monster, a bug...)."""
-        for n in ("combat", "fest", "folk", "animals", "sky", "museum", "land", "craft", "town"):
+        for n in ("combat", "fest", "folk", "animals", "sky", "museum", "land", "craft", "town", "bloom"):
             f = getattr(self, "_use_" + n, None)
             if f and f(p, loc, fx, fy, now):
                 return True

@@ -183,9 +183,9 @@ class Revival:
         if quiet:
             return
         self.event("The Valley Revival reached a new stage: %s! %s" % (STAGES[stage], BRINGS[stage]), now, "good")
-        self.ceremony(stage, now)
+        self.stage_speech(stage, now)
 
-    def ceremony(self, stage, now):
+    def stage_speech(self, stage, now):
         n = self.folk.get("Mayor Hazel")
         if n:
             n["bubble"] = ["★ " + STAGES[stage] + "!", now + 12]
