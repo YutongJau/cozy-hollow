@@ -191,3 +191,9 @@ kbd { background: #e2cfa7; border: 1px solid #b8975f; border-radius: 4px; paddin
 .mg { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .mg canvas { image-rendering: pixelated; background: #2b1f17; border-radius: 8px; border: 2px solid #8a6a3c; max-width: 100%; }
 .mg .mgs { font-weight: 600; }
+/* ---- the valley map */
+#menu .valley-map { display: block; width: 100%; height: auto; image-rendering: pixelated; border: 3px solid var(--wood); border-radius: 8px; background: #2e4a5a; }
+#menu .map-list { margin-top: 8px; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 12px; font-size: 14px; }
+#menu .map-who { display: flex; align-items: center; gap: 6px; }
+#menu .map-who .sw { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #2b1f17; display: inline-block; }
+#menu .box.wide { width: 900px; }

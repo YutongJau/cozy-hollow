@@ -667,7 +667,7 @@ def describe(key):
             "ticket": "Take it to the boat at the beach to sail to a mystery island.",
             "treat": "Feed it to a weakened monster and it may follow you home.",
             "machine_kit": "Hold it and press E on farm ground (%s)." % ("lays a stone path" if key == "path_stone" else "spans dug water"),
-            "key": "Lets you craft anywhere (C), no table needed.",
+            "key": "Lets you craft anywhere (C), no table needed." if key == "toolbelt" else "Press N to open it: the whole valley, and where everyone is right now.",
             "material": "A crafting material. Sells for %dg." % it["sell"]}
     if key == "star_fragment":
         return "A piece of a fallen star. Sells for %dg." % it["sell"]

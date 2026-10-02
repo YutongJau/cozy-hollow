@@ -54,6 +54,10 @@ CREATURES = {
     "rock_crab": ("\u0436", "x", 167, "red"), "ghost": ("\u03a9", "G", 252, "white"), "slime_king": ("\u25c9", "O", 46, "green"),
     "rabbit": ("r", "r", 180, "yellow"), "quail": ("q", "q", 137, "yellow"), "deer": ("\u00a5", "Y", 173, "yellow"), "boar": ("\u00df", "b", 95, "red"),
 }
+MAP_LAYOUT = {"frontier": (0, 50), "town": (68, 46), "farm": (144, 60), "mountain": (153, 18), "forest": (156, 94), "beach": (74, 94),
+              "island": (74, 128), "mine1": (240, 4), "mine2": (240, 33), "mine3": (240, 62)}
+MAP_AREA_C256 = {"farm": 136, "town": 144, "mountain": 101, "forest": 28, "beach": 186, "island": 35, "frontier": 173,
+                 "mine1": 240, "mine2": 240, "mine3": 240}
 HEN_C256 = {"white": 255, "brown": 173, "black": 240}
 MACHINE_GLYPHS = {"cheese_press": "\u2565", "preserves_jar": "\u25d8", "mayo_machine": "\u25d9", "bee_house": "\u2591",
                   "rock_tumbler": "\u25cd", "animal_trap": "\u2302", "craft_table": "\u2564", "tailor_table": "\u2566"}
@@ -154,7 +158,7 @@ def facing_name(f):
 
 SEASON_ICON = {"spring": "✿", "summer": "☀", "fall": "☘", "winter": "❄"}
 WEATHER_TEXT = {"sun": "Sunny", "rain": "Raining", "snow": "Snowing"}
-HINT = "WASD move  E act  F fish  X clear  1-9 hand  I bag  U eat  C craft  R ride  J journal  T chat  ? help  Q quit"
+HINT = "WASD move  E act  F fish  1-9 hand  I bag  U eat  C craft  R ride  J journal  N map  T chat  ? help  Q quit"
 
 
 def wrap(text, width):
@@ -451,6 +455,11 @@ class Client:
             self.send(dict(t="clear"))
         elif key in ("u", "U"):
             self.send(dict(t="eat"))
+        elif key in ("n", "N"):
+            if self.count_item("valley_map"):
+                self.mode = "map"
+            else:
+                self.add_log("You don't have a map yet - Father TongTong (by the chapel on the farm) has one for you.", "info", toast=True)
         elif key in ("r", "R"):
             self.send(dict(t="ride"))
         elif key in ("c", "C"):
@@ -999,6 +1008,78 @@ class Client:
         foot = m.get("foot") or "up/down choose   Enter pick   Esc close"
         self.put(y + bh - 2, x + 2, foot[:bw - 4], curses.A_DIM)
 
+    # ------------------------------------------------------------------ the valley map (N, once Father TongTong gave you one)
+    def keys_map(self, key):
+        if key in ("ESC", "q", "n", "N", "ENTER", " "):
+            self.mode = "play"
+
+    def map_spot(self, loc, x, y):
+        if loc in MAP_LAYOUT:
+            return loc, x, y
+        if loc in W.DOORS:
+            return ("farm",) + tuple(W.DOORS[loc])
+        for area, bl in AR.BUILDINGS.items():
+            for b in bl:
+                if b.get("to") == loc:
+                    return (area,) + tuple(b["door"])
+        for area, bl in ((self.state or {}).get("xb") or {}).items():
+            for b in bl:
+                if b.get("to") == loc and b.get("door"):
+                    return (area,) + tuple(b["door"])
+        if loc.startswith("deep"):
+            return "mine3", 20, 13
+        if loc == "mystery":
+            return "island", 30, 30
+        return None
+
+    def place_name(self, loc):
+        if loc == "farm":
+            return self.farm
+        if loc in AR.AREA_NAMES:
+            return AR.AREA_NAMES[loc]
+        if loc.startswith("deep"):
+            return "the Depths, floor " + loc[4:]
+        if loc == "mystery":
+            return "a mystery island"
+        spot = self.map_spot(loc, 0, 0)
+        return W.ROOM_TITLES.get(loc, "a building") + (", " + (self.farm if spot[0] == "farm" else AR.AREA_NAMES.get(spot[0], spot[0])) if spot else "")
+
+    def draw_valley_map(self, h, w):
+        st = self.state
+        P, rich, B = self.pal.pair, self.pal.c256, curses.A_BOLD
+        online = sorted((p for p in st["players"] if p["online"]), key=lambda p: (p["name"] != self.name, p["name"]))
+        bw, bh = min(w - 2, 118), min(h - 2, 30 + (len(online) + 1) // 2)
+        y, x, bh, bw = self.center_box(h, w, bh, bw, "Valley Map")
+        gw, gh = bw - 4, bh - 4 - (len(online) + 1) // 2
+        sx, sy = gw / 282.0, gh / 164.0
+        for loc, (lx, ly) in MAP_LAYOUT.items():
+            rows = self.map if loc == "farm" else self.rows_of(loc)
+            if not rows:
+                continue
+            cx, cy = x + 2 + int(lx * sx), y + 1 + int(ly * sy)
+            cw, chh = max(4, int(len(rows[0]) * sx)), max(2, int(len(rows) * sy))
+            attr = P(MAP_AREA_C256[loc], MAP_AREA_C256[loc]) if rich else P("green") | curses.A_DIM
+            for r in range(chh):
+                self.put(cy + r, cx, self.g(("\u2591", ":")) * cw, attr)
+            label = (self.farm if loc == "farm" else AR.AREA_NAMES[loc].replace("the ", "").title())[:cw]
+            self.put(cy, cx, label, (P(229, 236) if rich else P("white")) | B)
+        for p in online:
+            spot = self.map_spot(p.get("loc", "farm"), p["x"], p["y"])
+            if not spot or spot[0] not in MAP_LAYOUT:
+                continue
+            lx, ly = MAP_LAYOUT[spot[0]]
+            px_, py_ = x + 2 + int((lx + spot[1]) * sx), y + 1 + int((ly + spot[2]) * sy)
+            col = W.PLAYER_COLORS[p["color"] % len(W.PLAYER_COLORS)]
+            mark = "@" if p["name"] == self.name else p["name"][0].upper()
+            self.put(py_, px_, mark, P(col) | B | (curses.A_REVERSE if p["name"] == self.name else 0))
+        ly0 = y + 1 + gh + 1
+        for i, p in enumerate(online):
+            col = W.PLAYER_COLORS[p["color"] % len(W.PLAYER_COLORS)]
+            text = "%s %s%s - %s" % ("@" if p["name"] == self.name else p["name"][0].upper(), p["name"], " (you)" if p["name"] == self.name else "",
+                                     self.place_name(p.get("loc", "farm")))
+            self.put(ly0 + i // 2, x + 2 + (i % 2) * (bw // 2), text[:bw // 2 - 3], P(col) | B)
+        self.put(y + bh - 2, x + 2, "Everyone's live position. N or Esc closes.", curses.A_DIM)
+
     # ------------------------------------------------------------------ festival minigames, terminal style
     def start_minigame(self, game, seed):
         rng = random.Random(seed)
@@ -1481,6 +1562,8 @@ class Client:
             self.draw_fishing(h, w)
         elif self.mode == "list":
             self.draw_list(h, w)
+        elif self.mode == "map":
+            self.draw_valley_map(h, w)
         elif self.mode == "minigame" and self.mg:
             self.draw_minigame(h, w)
         scr.refresh()
@@ -1968,7 +2051,7 @@ class Client:
         elif self.chest_at(fx, fy):
             ahead = "Storage chest - E to open, X to pick it up."
         elif ft == "Y":
-            ahead = "Father TongTong - E to say hello."
+            ahead = "Father TongTong - E to say hello%s" % ("." if self.count_item("valley_map") else " (he has a map for you).")
         elif self.cow_at(fx, fy):
             cw = self.cow_at(fx, fy)
             ahead = "%s the cow - %s" % (cw["name"], "E to milk her!" if cw["milk"] else "milk %d%% ready." % cw["pct"])
@@ -2214,6 +2297,7 @@ class Client:
         ("J", "the farm journal: shared stats, milestones and farmers."),
         ("U / R / C", "U eats what you hold (or picks a snack), R hops on your horse, C crafts (at a crafting table, or anywhere with a toolbelt)."),
         ("V", "make a wish when a shooting star crosses the night sky."),
+        ("N", "the valley map: every place and where everyone is. Father TongTong (by the chapel) gives you one."),
         ("Villagers", "folks walk to work, the shops and home on the clock. E chats; E again while holding something gives it as a gift. "
                       "J then F lists your friends."),
         ("The valley", "walk off the farm's edges to town, the forest, the beach, the mountain and the mine. Festivals fill the "

@@ -480,7 +480,7 @@ function describeHere() {
   else if (ft === "~") ahead = "Pond - E refills the can, F goes fishing."; else if (ft === "w") ahead = "Well - E refills the can.";
   else if (ft === "m") ahead = "Mailbox - E to read your letters."; else if (ft === "N") ahead = "Barn - E to open the shared storage.";
   else if (chestAt(fx, fy)) ahead = "Storage chest - E to open it, X to pick it up. Everyone on the farm shares what is inside.";
-  else if (ft === "Y") ahead = "Father TongTong - E to say hello.";
+  else if (ft === "Y") ahead = "Father TongTong - E to say hello" + (me && !me.inventory.some(([k]) => k === "valley_map") ? " (he has a map for you)." : ".");
   else if (state.cows && state.cows.some((cw) => cw.x === fx && cw.y === fy)) { const cw = state.cows.find((c) => c.x === fx && c.y === fy); ahead = cw.name + " the cow - " + (cw.milk ? "E to milk her!" : "milk " + cw.pct + "% ready."); }
   else if ("Bchblspg".includes(ft)) ahead = catalog.terrain_names[ft].replace(/^./, (c) => c.toUpperCase()) + " - E to have a look.";
   else if (fd.t) { const [tk, stage, fruit, pct, eta] = fd.t, tr = catalog.trees[tk];
@@ -507,6 +507,7 @@ function menuSig(k) {
   if (k === "board") return JSON.stringify([state.quest, inv]);
   if (k === "bag") return JSON.stringify([inv, me && me.selected]);
   if (k === "list" || k === "mg") return null;
+  if (k === "map") return JSON.stringify(state.players.filter((q) => q.online).map((q) => [q.name, q.loc])); 
   if (k === "barn") { const mp = myPlayer(); return JSON.stringify([state.storage, inv, !!(mp && (mp.loc || "farm") === "farm" && chestAt(mp.x + mp.facing[0], mp.y + mp.facing[1]))]); }
   return null;
 }
@@ -537,6 +538,7 @@ function renderMenu(fresh) {
   const box = $("#menu"), h2 = box.querySelector("h2"), body = box.querySelector(".body"), foot = box.querySelector(".foot");
   const bank0 = body.querySelector(".rs-bank"), keep = fresh ? 0 : body.scrollTop, keepBank = fresh || !bank0 ? 0 : bank0.scrollTop;
   box.querySelector(".box").classList.toggle("rs", menu.kind === "barn");   // the chest window wears the old-school bank look
+  box.querySelector(".box").classList.toggle("wide", menu.kind === "map");
   body.innerHTML = ""; foot.textContent = "Esc closes";
   const k = menu.kind, d = menu.data;
   if (k === "shop") {
@@ -666,16 +668,18 @@ function renderMenu(fresh) {
     if (!inv.length) body.appendChild(el("p", null, "Your bag is empty."));
     inv.forEach(([key, n], i) => {
       const row = itemRow(key, el("span", "price", "x" + n), () => { send({ t: "select", i }); closeMenu(); }, i === me.selected ? "  (in hand)" : "");
+      if (key === "valley_map") { const b = el("button", "small", "Open"); b.onclick = (e) => { e.stopPropagation(); closeMenu(); openMap(); }; row.appendChild(b); }
       if (["food", "fruit", "crop", "forage", "artisan"].includes(catalog.items[key].kind)) { const b = el("button", "small", "Eat"); b.onclick = (e) => { e.stopPropagation(); send({ t: "eat", item: key }); }; row.appendChild(b); }
       row.appendChild(el("div", "blurb", blurb(key))); row.style.flexWrap = "wrap"; body.appendChild(row);
     });
     foot.textContent = "Click something to hold it. Esc closes.";
+  } else if (k === "map") { renderMap(h2, body, foot);
   } else if (k === "help") {
     h2.textContent = "How to farm";
     body.innerHTML = "<p><kbd>WASD</kbd> or arrows to walk. You act on the tile you stand on; the pond, shop, bin, board, well, mailbox and trees are used by facing them (they glow).</p>" +
       "<p><kbd>E</kbd> or <kbd>Space</kbd> does the natural thing: till grass, plant the seed in hand, water, harvest, pick forage, refill the can at the pond or well, open the shop / bin / board.</p>" +
       "<p><kbd>F</kbd> fishes when facing the pond: keep the fish inside your net with <kbd>&larr;</kbd> <kbd>&rarr;</kbd> or the mouse.</p>" +
-      "<p><kbd>X</kbd> clears the tile you stand on, or picks up the storage chest you face (carry it and press <kbd>E</kbd> to set it down). <kbd>1</kbd>-<kbd>9</kbd> pick what you hold, <kbd>I</kbd> opens the bag, <kbd>J</kbd> the journal, <kbd>T</kbd> chats, <kbd>M</kbd> music (and the songs Rowan teaches you), <kbd>+</kbd>/<kbd>-</kbd> zoom.</p>" +
+      "<p><kbd>X</kbd> clears the tile you stand on, or picks up the storage chest you face (carry it and press <kbd>E</kbd> to set it down). <kbd>1</kbd>-<kbd>9</kbd> pick what you hold, <kbd>I</kbd> opens the bag, <kbd>J</kbd> the journal, <kbd>N</kbd> the valley map (Father TongTong gives you one), <kbd>T</kbd> chats, <kbd>M</kbd> music (and the songs Rowan teaches you), <kbd>+</kbd>/<kbd>-</kbd> zoom.</p>" +
       "<p>Explore the valley: walk off the farm's paths west to <b>Hollow Town</b> (shops, saloon, museum, folks to talk to), north to <b>Summit Ridge</b> and its <b>mine</b> (break ore and gems with the pickaxe, ladders go deeper), south to the <b>Whisperwood</b>. From town go south to <b>Driftwood Beach</b>, where a boat at the pier sails to <b>Palm Isle</b>; the stagecoach in town rides to <b>Dusty Gulch</b>. Fish in rivers, lakes and the sea, and forage what each place grows.</p>" +
       "<p><b>Folks and festivals.</b> Villagers walk to work, the shops and home on the clock. Face one and press <kbd>E</kbd> to chat; press it again holding something to give it as a gift (everyone has favourites). On festival days the town square fills up: talk to Mayor Hazel for the line dance, the rodeo, the livestock fair, Fallfest, the fishing derby or the winter feast. The <b>Town Hall</b> takes donations for projects that grow the town and bring new neighbours.</p>" +
       "<p><b>Making things.</b> <kbd>C</kbd> crafts at a crafting table (or anywhere with a toolbelt): machines like the cheese press, preserves jar, bee house and rock tumbler, animal traps, path stones and bridges. Cook at the farmhouse fireplace, and <kbd>U</kbd> eats what you hold for health and a little boost. The tailoring table sews hats.</p>" +
@@ -754,7 +758,7 @@ window.addEventListener("keydown", (e) => {
   if (mode === "minigame") { mgKey(e); return; }
   if (mode === "menu" && menu && menu.kind === "list" && e.key !== "Escape") { listKeys(e); return; }
   if (mode === "menu") {
-    if (e.key === "Escape" || e.key === "i" || e.key === "I" || (menu && menu.kind === "help" && (e.key === "?" || e.key === "h" || e.key === "H")) || (menu && menu.kind === "journal" && (e.key === "j" || e.key === "J"))) { if (menu && menu.kind === "proposal") send({ t: "propose_answer", yes: false }); closeMenu(); }
+    if (e.key === "Escape" || e.key === "i" || e.key === "I" || (menu && menu.kind === "help" && (e.key === "?" || e.key === "h" || e.key === "H")) || (menu && menu.kind === "journal" && (e.key === "j" || e.key === "J")) || (menu && menu.kind === "map" && (e.key === "n" || e.key === "N"))) { if (menu && menu.kind === "proposal") send({ t: "propose_answer", yes: false }); closeMenu(); }
     if (menu && menu.kind === "shop") {
       if (e.key === "ArrowDown") { menu.cursor = (menu.cursor + 1) % menu.data.stock.length; renderMenu(); e.preventDefault(); }
       if (e.key === "ArrowUp") { menu.cursor = (menu.cursor - 1 + menu.data.stock.length) % menu.data.stock.length; renderMenu(); e.preventDefault(); }
@@ -773,6 +777,7 @@ window.addEventListener("keydown", (e) => {
   }
   else if (e.key === "f" || e.key === "F") send({ t: "fish_start" });
   else if (e.key === "u" || e.key === "U") send({ t: "eat" });
+  else if (e.key === "n" || e.key === "N") openMap();
   else if (e.key === "r" || e.key === "R") send({ t: "ride" });
   else if (e.key === "c" || e.key === "C") send({ t: "craft_open" });
   else if (e.key === "v" || e.key === "V") wish();
@@ -1041,7 +1046,7 @@ function renderFrame(now) {
   if (farm) for (const c of state.chickens || []) {
     const v = chickViz[c.id]; if (!v || !inView(v.x, v.y)) continue;
     const fr = v.moving ? 1 : (Math.floor(now / 700 + c.id) % 6 === 0 ? 2 : 0);
-    ents.push({ y: v.y + 0.8, draw: () => { drawSide(Art.chickenSprite(c.c, fr), v.x, v.y, c.f, ox, oy, T, -3); if (c.egg) readyBubble(ox + v.x * T, oy + v.y * T - 8 * SCALE, "egg", now); } });
+    ents.push({ y: v.y + 0.8, draw: () => { drawSide(Art.chickenSprite(c.c, fr), v.x, v.y, c.f, ox, oy, T, 1); if (c.egg) readyBubble(ox + v.x * T, oy + v.y * T - 8 * SCALE, "egg", now); } });
   }
   for (const pt of state.pets || []) { const v = petViz[pt.owner]; if (v && v.loc === loc && inView(v.x, v.y)) ents.push({ y: v.y + 0.85, draw: () => drawPet(pt, v, ox, oy, now) }); }
   for (const owner in compViz) { const v = compViz[owner]; if (v.loc === loc && inView(v.x, v.y)) ents.push({ y: v.y + 0.85, draw: () => drawMob(v.kind, v, ox, oy, now, 1, true, 0) }); }
@@ -1049,7 +1054,7 @@ function renderFrame(now) {
   for (const c of (state.critters || {})[loc] || []) {
     const v = critViz[c.id]; if (!v || !inView(v.x, v.y)) continue;
     const big = c.k === "deer";
-    ents.push({ y: v.y + 0.85, draw: () => drawSide(Art.critterSprite(c.k, v.moving ? Math.floor(now / 140) % 2 : 0), v.x, v.y, c.f, ox, oy, big ? 48 * SCALE : T, big ? -18 : -2, big ? -8 : 0) });
+    ents.push({ y: v.y + 0.85, draw: () => drawSide(Art.critterSprite(c.k, v.moving ? Math.floor(now / 140) % 2 : 0), v.x, v.y, c.f, ox, oy, big ? 48 * SCALE : T, big ? -12 : c.k === "rabbit" ? 3 : 2, big ? -8 : 0) });
   }
   if (loc === "town" && state.festival) festivalDecor(state.festival, ents, ox, oy, now);
   // 3. buildings: shadows, the farmhouse porch and smoke, then the sprites as depth-sorted entities
@@ -1515,7 +1520,7 @@ function drawPet(pt, v, ox, oy, now) {
   const sx = Math.round(ox + v.x * T), sy = Math.round(oy + v.y * T);
   ctx.fillStyle = "rgba(0,0,0,.18)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, sy + T - 3 * SCALE, 10 * SCALE, 3 * SCALE, 0, 0, 6.3); ctx.fill();
   const coats = (Art.PET_COATS || {})[pt.kind] || [""]; let h = 0; for (const ch of pt.name || "") h = (h * 31 + ch.charCodeAt(0)) >>> 0;   // every pet its own coat
-  ctx.drawImage(Art.petSprite(pt.kind, facing, fr, coats[h % coats.length]), sx, sy - 4 * SCALE, T, T);
+  ctx.drawImage(Art.petSprite(pt.kind, facing, fr, coats[h % coats.length]), sx, sy + (facing === "left" || facing === "right" ? 3 : 2) * SCALE, T, T);
 }
 function drawMob(kind, v, ox, oy, now, hp, tame, hurt) {
   const big = kind === "slime_king", size = big ? 48 * SCALE : T, flying = kind === "bat" || kind === "ghost";
@@ -1804,6 +1809,117 @@ function aheadExtra(loc, fx, fy) {
   for (const c of (state.critters || {})[loc] || []) if (c.x === fx && c.y === fy) return "Wild game - a bow, rifle or slingshot can bag it.";
   if (/^deep/.test(loc) && (curMap()[fy] || "")[fx] === "Z") return "A treasure chest - E to open it.";
   return null;
+}
+// ------------------------------------------------------------------ the Valley Map (Father TongTong's gift): every place, laid out the way
+// the paths join them, drawn small from its real tiles, with a dot for everyone who's out and about
+const MAP_LAYOUT = { frontier: [0, 50], town: [68, 46], farm: [144, 60], mountain: [153, 18], forest: [156, 94], beach: [74, 94],
+  island: [74, 128], mine1: [240, 4], mine2: [240, 33], mine3: [240, 62] };
+const MAP_PX = 2, MAP_W = 282, MAP_H = 164, _mapArea = {};
+function mapTileColor(ch, loc) {
+  if (ch === "~" || ch === "I") return "#4a90d0";
+  if ("TPAKu".includes(ch)) return "#2f6a3a";
+  if (ch === "@" || ch === "W" || ch === "+") return "#b5654a";
+  if (ch === "S" || ch === "N") return "#9a5aa0";
+  if (ch === ":" || ch === "=") return "#c9a66b";
+  if (ch === "," || ch === "H") return "#e6d39a";
+  if (ch === "d") return "#a87a4a";
+  if (ch === "#" || ch === "G") return "#8a6a4a";
+  if (ch === "R" || ch === "C") return /^mine/.test(loc) ? "#3a3236" : "#7a6a62";
+  if (ch === "v" || ch === "U" || ch === "D") return "#6a5e56";
+  if (ch === "z") return "#d9a066";
+  if (ch === "r") return "#a8a4a0";
+  if (ch === "o" || ch === "B") return "#9a9890";
+  return loc === "frontier" ? "#d9a066" : state && state.season === "winter" ? "#e8eef2" : state && state.season === "fall" ? "#a0a050" : "#6cb04a";
+}
+function mapRows(loc) { return loc === "farm" ? map : (catalog.areas || {})[loc] || []; }
+function mapAreaImage(loc) {
+  const rows = mapRows(loc), key = loc + worldSig + (state ? state.season : "");
+  if (_mapArea[loc] && _mapArea[loc].key === key) return _mapArea[loc].img;
+  const c = document.createElement("canvas"); c.width = rows[0].length * MAP_PX; c.height = rows.length * MAP_PX;
+  const g = c.getContext("2d");
+  for (let y = 0; y < rows.length; y++) for (let x = 0; x < rows[y].length; x++) { g.fillStyle = mapTileColor(rows[y][x], loc); g.fillRect(x * MAP_PX, y * MAP_PX, MAP_PX, MAP_PX); }
+  _mapArea[loc] = { key, img: c };
+  return c;
+}
+function mapSpot(loc, x, y) {
+  /* where on the map someone is: outdoors at their tile; indoors at their building's door; deep down in the mine, in the mine */
+  if (MAP_LAYOUT[loc]) return [loc, x, y];
+  if (catalog.doors && catalog.doors[loc]) return ["farm", catalog.doors[loc][0], catalog.doors[loc][1]];
+  for (const a in catalog.buildings || {}) for (const b of catalog.buildings[a]) if (b.to === loc && b.door) return [a, b.door[0], b.door[1]];
+  for (const a in (state && state.xb) || {}) for (const b of state.xb[a]) if (b.to === loc) return [a, b.door ? b.door[0] : b.x + (b.w >> 1), b.door ? b.door[1] : b.y + b.h - 1];
+  if (/^deep/.test(loc)) return ["mine3", 20, 13];
+  if (loc === "mystery") return ["island", 30, 30];
+  return null;
+}
+function placeName(loc) {
+  if (loc === "farm") return farmName;
+  if ((catalog.area_names || {})[loc]) return catalog.area_names[loc];
+  if (/^deep/.test(loc)) return "the Depths, floor " + loc.slice(4);
+  if (loc === "mystery") return "a mystery island";
+  const room = (catalog.rooms || {})[loc] || "a building", spot = mapSpot(loc, 0, 0);
+  return room + (spot && spot[0] !== "farm" ? ", " + ((catalog.area_names || {})[spot[0]] || spot[0]) : spot ? ", the farm" : "");
+}
+function drawValleyMap(cv, now) {
+  const g = cv.getContext("2d"), P = MAP_PX;
+  cv.width = MAP_W * P; cv.height = MAP_H * P;
+  g.fillStyle = "#2e4a5a"; g.fillRect(0, 0, cv.width, cv.height);
+  for (let i = 0; i < 260; i++) { g.fillStyle = "rgba(255,255,255,.05)"; g.fillRect((i * 97) % cv.width, (i * 53) % cv.height, 6, 1); }   // a sea of little waves
+  g.imageSmoothingEnabled = false; g.textBaseline = "bottom"; g.font = "bold 11px 'Pixelify Sans', sans-serif";
+  for (const loc in MAP_LAYOUT) {
+    const rows = mapRows(loc); if (!rows.length) continue;
+    const [lx, ly] = MAP_LAYOUT[loc], x0 = lx * P, y0 = ly * P, w = rows[0].length * P, h = rows.length * P;
+    g.fillStyle = "rgba(0,0,0,.35)"; g.fillRect(x0 + 3, y0 + 3, w, h);
+    g.drawImage(mapAreaImage(loc), x0, y0);
+    g.strokeStyle = "#2b1f17"; g.lineWidth = 2; g.strokeRect(x0 - 1, y0 - 1, w + 2, h + 2);
+    const label = loc === "farm" ? farmName : (catalog.area_names[loc] || loc).replace(/^the /, "").replace(/^./, (c) => c.toUpperCase());
+    const tw = g.measureText(label).width;
+    g.fillStyle = "rgba(43,31,23,.8)"; g.fillRect(x0 + 4, y0 + 3, tw + 8, 14);
+    g.fillStyle = "#f6ead0"; g.fillText(label, x0 + 8, y0 + 16);
+  }
+  // everyone online: a dot in their shirt colour, a name tag; you get a gently pulsing ring
+  const dots = [];
+  for (const p of state.players) {
+    if (!p.online) continue;
+    const s = mapSpot(p.loc || "farm", p.x, p.y); if (!s) continue;
+    const L = MAP_LAYOUT[s[0]]; if (!L) continue;
+    dots.push({ p, x: (L[0] + s[1]) * P + P / 2, y: (L[1] + s[2]) * P + P / 2 });
+  }
+  for (const d of dots) {
+    const col = COLORS[catalog.player_colors[d.p.color % catalog.player_colors.length]] || "#fff", mine = d.p.name === prefs.name;
+    if (mine) { const r = 9 + Math.sin(now / 250) * 2; g.strokeStyle = "#fffaf0"; g.lineWidth = 2; g.beginPath(); g.arc(d.x, d.y, r, 0, 6.3); g.stroke(); }
+    g.fillStyle = "#2b1f17"; g.beginPath(); g.arc(d.x, d.y, 6, 0, 6.3); g.fill();
+    g.fillStyle = col; g.beginPath(); g.arc(d.x, d.y, 4.5, 0, 6.3); g.fill();
+    g.font = "bold 10px 'Pixelify Sans', sans-serif";
+    const name = mine ? "You" : d.p.name, tw = g.measureText(name).width;
+    g.fillStyle = "rgba(43,31,23,.85)"; g.fillRect(d.x - tw / 2 - 4, d.y - 22, tw + 8, 13);
+    g.fillStyle = mine ? "#ffe066" : "#fffaf0"; g.textAlign = "center"; g.fillText(name, d.x, d.y - 10); g.textAlign = "left";
+  }
+}
+let mapRaf = 0;
+function mapKick() { if (!mapRaf) mapRaf = requestAnimationFrame(mapFrame); }
+function mapFrame(now) {
+  mapRaf = 0;
+  if (!menu || menu.kind !== "map") return;
+  const cv = document.querySelector("#menu .valley-map"); if (!cv || !state) return;
+  drawValleyMap(cv, now);
+  mapKick();
+}
+function renderMap(h2, body, foot) {
+  h2.textContent = "Valley Map";
+  const cv = document.createElement("canvas"); cv.className = "valley-map"; body.appendChild(cv);
+  const list = el("div", "map-list");
+  for (const p of state.players.filter((q) => q.online).sort((a, b) => (a.name === prefs.name ? -1 : b.name === prefs.name ? 1 : a.name.localeCompare(b.name)))) {
+    const row = el("div", "map-who"); const sw = el("span", "sw"); sw.style.background = COLORS[catalog.player_colors[p.color % catalog.player_colors.length]];
+    row.appendChild(sw); row.appendChild(el("b", null, p.name === prefs.name ? p.name + " (you)" : p.name)); row.appendChild(el("span", null, " - " + placeName(p.loc || "farm")));
+    list.appendChild(row);
+  }
+  body.appendChild(list);
+  foot.textContent = "Everyone's live position. N or Esc closes.";
+  mapKick();
+}
+function openMap() {
+  if (!(me && me.inventory.some(([k]) => k === "valley_map"))) { toast("You don't have a map yet - Father TongTong (by the chapel on the farm) has one for you.", "info"); return; }
+  openMenu("map", {});
 }
 let _ox = 0, _oy = 0;
 function drawBubble(x, y, text) {

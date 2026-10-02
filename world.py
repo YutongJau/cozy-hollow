@@ -259,6 +259,7 @@ _item("scythe", "Scythe", "gear", 0, ")", ")", "white", verb="harvest and cut cr
 _item("axe", "Axe", "gear", 0, "P", "P", "yellow", verb="chop trees you planted")
 _item("pickaxe", "Pickaxe", "gear", 0, "T", "T", "white", verb="break rocks and ore, undo soil, lift sprinklers")
 _item("fishing_rod", "Fishing Rod", "gear", 0, "j", "j", "cyan", verb="fish in ponds, rivers, lakes and the sea")
+_item("valley_map", "Valley Map", "key", 0, "m", "m", "yellow")      # Father TongTong's gift: N shows the valley and where everyone is
 
 MILESTONES = [
     ("cows", 1, "Moo-ving In"), ("milk", 10, "Dairy Days"), ("weddings", 1, "Happily Ever After"),
@@ -1615,6 +1616,11 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         if fterr == "N" or self.chest_at(fx, fy):
             return self.act_barn(p, msg, now)
         if fterr == "Y":
+            if not self.count(p, "valley_map"):
+                self.give(p, "valley_map", 1)
+                self.dirty = True
+                self.event("Father TongTong gave %s a Valley Map." % p["name"], now)
+                return self.say(p, "Father TongTong: Take this map, child, so you never lose sight of your friends. (Press N to open it.)", "good")
             sp = self.spouse_of(p["name"])
             if sp:
                 return self.say(p, "Father TongTong: Bless you and %s. How are the crops?" % sp)
