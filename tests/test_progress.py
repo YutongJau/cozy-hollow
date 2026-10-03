@@ -33,6 +33,7 @@ def msgs(out):
 
 now = at_hour(time.time(), 11)
 w = W.World()
+w.created = now - 60          # the farm began a minute ago, so the season and day never depend on the real time
 w.coins = 100000
 w.join("T", now)
 p = w.players["T"]
@@ -49,6 +50,8 @@ def set_level(lv):
 
 def put(loc, x, y, facing=(0, 1)):
     p.update(loc=loc, x=x, y=y, facing=list(facing))
+    if loc == "farm":
+        w.tiles.get((x + facing[0], y + facing[1]), {}).pop("forage", None)   # a mushroom that sprouted just there would be picked instead
 
 
 def hold(key):

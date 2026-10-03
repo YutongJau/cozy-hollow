@@ -30,6 +30,7 @@ def at_hour(base, h):
 
 now = at_hour(time.time(), 10)
 w = W.World()
+w.created = now - 60          # the farm began a minute ago: same season and day whatever the real time (10 o'clock can be earlier than now)
 w.join("A", now)
 w.join("B", now)
 a, b = w.players["A"], w.players["B"]

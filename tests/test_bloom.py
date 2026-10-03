@@ -5,6 +5,7 @@ Sol's hot spring, the stage-up ceremony in the square, and older farms catching 
 """
 import os
 import sys
+import random
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -25,8 +26,10 @@ def at_hour(base, h):
     return base - base % W.SKY_DAY + ((h / 24 * W.SKY_DAY - 360 - W.SKY_SHIFT) % W.SKY_DAY)
 
 
+random.seed(7)                # the same coin flips every run
 now = at_hour(time.time(), 10)
 w = W.World()
+w.created = now - 60          # the farm began a minute ago: same season and day whatever the real time (10 o'clock can be earlier than now)
 w.coins = 5000
 w.join("T", now)
 p = w.players["T"]

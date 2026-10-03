@@ -23,6 +23,7 @@ def check(ok, label):
 
 now = time.time()
 w = W.World()
+w.created = now - 60          # the farm began a minute ago, so the season and day never depend on the real time
 w.join("T", now)
 p = w.players["T"]
 p.update(loc="farm", x=20, y=11, facing=[0, 1])

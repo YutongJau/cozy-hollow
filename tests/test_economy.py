@@ -26,6 +26,9 @@ def at_hour(base, h):
 
 now = at_hour(time.time(), 10)
 w = W.World()
+w.created = now - 60          # the farm began a minute ago: same season and day whatever the real time (10 o'clock can be earlier than now)
+for t in w.tiles.values():
+    t.pop("forage", None)       # no wild plants where the test tills or places things (they'd rightly be left alone, or picked)
 w.join("T", now)
 p = w.players["T"]
 p["xp"] = 60 * 30 * 30

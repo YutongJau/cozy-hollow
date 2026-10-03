@@ -22,6 +22,7 @@ def check(ok, label):
 
 now = time.time()
 w = W.World()
+w.created = now - 60          # the farm began a minute ago, so the season and day never depend on the real time
 w.coins = 1000
 w.join("A", now)
 w.join("B", now)
