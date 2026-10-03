@@ -999,7 +999,7 @@ function updateSelf(dt, now) {
   if (len && moved < Math.hypot(my.vx, my.vy) * dt * 0.25) { my.vx *= 0.5; my.vy *= 0.5; }   // pressing into a wall: don't keep a full head of speed
   my.dist += moved;
   my.stepping = moved / Math.max(dt, 1e-3) > 0.6;
-  if (run && my.stepping && now - lastDust > 130 && isOutdoor(loc)) { lastDust = now; runDust.push({ x: my.x + 0.5, y: my.y + 0.92, t0: now, loc }); }
+  if (run && my.stepping && now - lastDust > 120 && isOutdoor(loc)) { lastDust = now; kickDust(my.x, my.y, my.vx, my.vy, loc); }
   if (my.stepping) footsteps(now, loc);
   // the tile under our feet changed: tell the server (one step at a time, diagonals included)
   const [tx, ty] = footTile(my.x, my.y);
@@ -1076,7 +1076,7 @@ function routeTo(gx, gy, use) {
   return true;
 }
 // ------------------------------------------------------------------ rendering
-let lastFrame = performance.now(), waterFrame = 0, waterAcc = 0, smokeAcc = 0;
+let lastFrame = performance.now(), waterFrame = 0, waterAcc = 0, smokeAcc = 0, volcAcc = 0;
 function isType(x, y, ch) { return y >= 0 && y < RG.length && x >= 0 && x < RG[0].length && RG[y][x] === ch; }
 function isSoil(x, y) { const d = tiles[x + "," + y]; return !!(d && d.s); }
 function blob(sx, sy, same, under, fill, edge, bumpy) {
@@ -1368,7 +1368,11 @@ function renderFrame(now) {
     if (farm && b.kind === "W") {
       const dx = Math.floor((b.x0 + b.x1) / 2), py = b.y1 + 1;
       ["L", "M", "R"].forEach((part, i) => ctx.drawImage(Art.porchTile(part), ox + (dx - 1 + i) * T, oy + py * T, T, T));
-      smokeAcc += dt; if (smokeAcc > 0.45) { smokeAcc = 0; smoke.push({ x: b.x1 - 2.2, y: b.y0 - 0.55, a: 0.55, r: 2.5, vx: 0.15 + Math.random() * 0.2 }); }
+      smokeAcc += dt; if (smokeAcc > 0.45) { smokeAcc = 0; smoke.push({ x: b.x1 - 2.2, y: b.y0 - 0.55, a: 0.55, r: 2.5, vx: 0.15 + Math.random() * 0.2, loc }); }
+    }
+    if (b.kind === "volcano") {                                  // the volcano breathes out slow, drifting puffs of smoke
+      volcAcc += dt;
+      if (volcAcc > 0.6) { volcAcc = 0; smoke.push({ x: b.x0 + 6.6 + (Math.random() - 0.5) * 0.5, y: b.y0 + 0.1, a: 0.5, r: 4 + Math.random() * 2, vx: 0.18 + Math.random() * 0.15, rise: 0.45, grow: 2.6, col: Math.random() < 0.5 ? "214,208,200" : "190,184,176", loc }); }
     }
     const w = b.x1 - b.x0 + 1, hh = b.y1 - b.y0 + 1;
     const spr = farm && "WSN".includes(b.kind) ? Art.buildingSprite(b.kind, w, hh, night > 0.2) : Art.areaBuilding(b.kind, w, hh, night > 0.2, b.label, season);
@@ -1378,9 +1382,13 @@ function renderFrame(now) {
       for (const [wx, wy] of boarded) ctx.drawImage(Art.boardsSprite(), ox + (b.x0 + wx) * T - 10 * SCALE, oy + (b.y0 + wy) * T - 9 * SCALE, 20 * SCALE, 18 * SCALE);
     } });
   }
-  for (const sm of smoke) { sm.y -= 0.35 * dt; sm.x += sm.vx * dt; sm.a -= 0.1 * dt; sm.r += 1.4 * dt; }
-  smoke = smoke.filter((sm) => sm.a > 0);
-  if (farm) for (const sm of smoke) { ctx.fillStyle = "rgba(240,240,244," + sm.a + ")"; ctx.beginPath(); ctx.arc(ox + sm.x * T, oy + sm.y * T, sm.r * SCALE, 0, 6.3); ctx.fill(); }
+  for (const sm of smoke) { sm.y -= (sm.rise || 0.35) * dt; sm.x += sm.vx * dt; sm.a -= 0.1 * dt; sm.r += (sm.grow || 1.4) * dt; }
+  smoke = smoke.filter((sm) => sm.a > 0 && (sm.loc || "farm") === loc);
+  for (const sm of smoke) {
+    const sx = ox + sm.x * T, sy = oy + sm.y * T, rr = sm.r * SCALE;
+    ctx.fillStyle = "rgba(" + (sm.col || "240,240,244") + "," + sm.a.toFixed(3) + ")"; ctx.beginPath(); ctx.arc(sx, sy, rr, 0, 6.3); ctx.fill();
+    if (sm.col) { ctx.fillStyle = "rgba(255,255,255," + (sm.a * 0.45).toFixed(3) + ")"; ctx.beginPath(); ctx.arc(sx - rr * 0.3, sy - rr * 0.3, rr * 0.45, 0, 6.3); ctx.fill(); }   // a soft lit top on each billow
+  }
   profMark("highlight");
   // 4. facing highlight
   const meP = meNow();
@@ -1442,9 +1450,7 @@ function renderFrame(now) {
   drawParts("ground", ox, oy, now, dt, loc);
   drawClickMark(ox, oy, now);
   drawHover(ox, oy, now);
-  runDust = runDust.filter((d) => now - d.t0 < 420);              // little puffs at a runner's heels
-  for (const d of runDust) if (d.loc === loc) { const u = (now - d.t0) / 420; ctx.save(); ctx.globalAlpha = 0.7; dust(ox + d.x * T, oy + d.y * T, u * 0.8); ctx.restore(); }
-  for (const name in viz) { const v = viz[name]; if (v.fast && v.loc === loc && now - (v.lastDust || 0) > 130) { v.lastDust = now; runDust.push({ x: v.x + 0.5, y: v.y + 0.92, t0: now, loc }); } }
+  for (const name in viz) { const v = viz[name]; if (v.fast && v.loc === loc && now - (v.lastDust || 0) > 130) { v.lastDust = now; kickDust(v.x, v.y, 0, 0, loc); } }
   ents.sort((a, b) => a.y - b.y).forEach((e) => {
     if (e.tree) {
       ctx.fillStyle = "rgba(0,0,0,.2)"; ctx.beginPath(); ctx.ellipse(e.sx + T / 2, e.sy + T - 2 * SCALE, 18 * SCALE, 6 * SCALE, 0, 0, 6.3); ctx.fill();
@@ -2140,6 +2146,14 @@ function groundAt(loc, x, y) {
 }
 const STEP_LOOK = { path: ["#d9c29a", "#c9ae82"], sand: ["#f0dfb4", "#e2cc98"], soil: ["#8a5a34", "#a8744a"], grass: ["#7cc25a", "#5fa046", "#a8d86a"],
   snow: ["#ffffff", "#e8f2ff"], stone: ["#b8b2a8", "#9a948a"], wood: ["#c9a06a", "#a67c4a"], rug: ["#c9a06a"] };
+function kickDust(x, y, vx, vy, loc) {
+  /* a runner (or a horse) kicks up little square puffs behind them, in the colour of the ground */
+  const [fx, fy] = footTile(x, y), g = groundAt(loc, fx, fy);
+  if (g === "wood" || g === "rug") return;
+  const cols = STEP_LOOK[g] || STEP_LOOK.path, sp = Math.hypot(vx, vy) || 1;
+  for (let i = 0; i < 3; i++) spawn({ x: x + 0.5 + (Math.random() - 0.5) * 0.3, y: y + 0.92, z: 0.05, vx: -vx / sp * (0.6 + Math.random() * 0.8) + (Math.random() - 0.5) * 0.6, vy: -vy / sp * 0.3,
+    vz: 0.8 + Math.random() * 0.8, g: g === "grass" ? 6 : 2.5, loc, layer: "ground", col: cols[i % cols.length], life: 380 + Math.random() * 160, size: g === "grass" ? 1 : 1.7 });
+}
 function footsteps(now, loc) {
   /* a puff (or a few grass bits, or snow) at each footfall, and the softest step sound */
   if (my.dist - (my.lastStepDist || 0) < 0.95) return;

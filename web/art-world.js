@@ -700,25 +700,103 @@ function tikiHut(g, W, H, w, h, night, seed) {
   [wallX - 6, wallX + wallW + 2].forEach((x) => { px(g, x, base - 34, 3, 34, "#6a4a1a"); px(g, x - 2, base - 40, 7, 6, "#f28c28"); px(g, x - 1, base - 43, 5, 3, "#ffe066"); });
 }
 function volcano(g, W, H, w, h, night, seed) {
-  /* a cone of dark rock rising out of the jungle: lit left flank, shaded right flank, ledges, lava trickles from the glowing crater,
-     a curl of smoke and green jungle puffs round its foot */
-  const r = rng(seed), cx = Math.floor(W / 2), base = H - 4, peak = 50;
-  const R = { deep: "#2e2622", dark: "#463a34", mid: "#5f5049", light: "#7a6a60", hi: "#94837a" };
-  for (let y = peak; y < base; y++) {
-    const t = (y - peak) / (base - peak), hw = Math.round(24 + (W / 2 - 26) * Math.pow(t, 0.8));
-    for (let x = cx - hw; x < cx + hw; x++) {
-      const side = (x - cx) / hw;
-      let col = side < -0.45 ? R.light : side < 0.05 ? R.mid : side < 0.5 ? R.dark : R.deep;
-      if ((hash(x >> 2, y >> 1) % 23) === 0) col = side < 0 ? R.hi : R.deep;
-      px(g, x, y, 1, 1, col);
-    }
-    if (y % 14 === 6) { const lx = cx - hw + ri(r, 4, 12), lw = ri(r, 10, 20); px(g, lx, y, lw, 1, R.hi); px(g, lx, y + 1, lw, 1, R.deep); }
+  /* Palm Isle's volcano, drawn like everything else in the valley: a broad cone with a rocky, uneven skyline and a notched
+     crater, lit from the top left in soft dithered bands that follow its curve; ridges and gullies running down from the rim;
+     ledges of layered rock; moss creeping up the lower slopes; a glowing crater and one thick, lazy lava river (bright core,
+     dark cooling crust) that pools at the foot; and a jungle of palms, leafy bushes and flowers round the base.
+     The smoke is drawn by the game as drifting puffs, so it can move. */
+  const r = rng(seed), cx = Math.floor(W / 2) + 6, base = H - 6, peak = 40, crater = 26;
+  const R = { deep: "#2a2320", dark: "#3d3330", mid: "#55473f", light: "#6e5e53", hi: "#8a786b", top: "#a39183" };
+  const MOSS = { dark: "#3f6a2a", mid: "#5a8a34", light: "#7aa846" };
+  // the outline: half-widths left and right at each row, with lumpy rock along the edges
+  const left = [], right = [];
+  for (let y = peak; y <= base; y++) {
+    const t = (y - peak) / (base - peak), hw = crater + (W / 2 - crater - 4) * (0.55 * t + 0.45 * Math.pow(t, 2.1));
+    const bumpL = (hash(y >> 2, 11) % 4) - 1.5 + Math.sin(y * 0.21) * 1.5, bumpR = (hash(y >> 2, 23) % 4) - 1.5 + Math.sin(y * 0.17 + 2) * 1.5;
+    left.push(Math.round(cx - hw + bumpL * (0.4 + t))); right.push(Math.round(cx + hw * 0.96 + bumpR * (0.4 + t)));
   }
-  for (let i = 0; i < 3; i++) { let x = cx + [-9, 2, 10][i], y = peak + 3; for (let k = 0; k < 60 && y < base - 50; k++) { px(g, x, y, 2, 2, k < 10 ? "#ffcf5e" : k < 30 ? "#f28c28" : "#c8402a"); if (k % 3 === 0) x += ri(r, -1, 1); y += 2; } }
-  ellipse(g, cx, peak, 25, 6, R.deep); ellipse(g, cx, peak + 1, 19, 3, "#f2602a"); ellipse(g, cx, peak, 13, 2, "#ffcf5e"); px(g, cx - 5, peak - 1, 10, 1, "#fff2a8");
-  for (let i = 0; i < 6; i++) { disc(g, cx + 6 + i * 4, peak - 10 - i * 7, 5 + (i % 2), i % 2 ? "#b8b4ae" : "#d8d4ce"); dot(g, cx + 4 + i * 4, peak - 12 - i * 7, "#ffffff"); }
-  const pal = TREE_PAL.green;
-  for (let x = 14; x < W - 14; x += 13) { const y = base - 10 - (hash(x, 5) % 10); ART.puff(g, x, y, 9 + (hash(x, 9) % 4), pal, x); }
+  // shading: a smooth light-to-dark across the cone (lit top left), with an ordered dither between bands
+  const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  const tones = [R.top, R.hi, R.light, R.mid, R.dark, R.deep];
+  for (let y = peak; y <= base; y++) {
+    const L = left[y - peak], Rr = right[y - peak], t = (y - peak) / (base - peak);
+    for (let x = L; x <= Rr; x++) {
+      const side = (x - L) / Math.max(1, Rr - L);                         // 0 at the lit edge, 1 at the shadowed one
+      const v = Math.min(tones.length - 1.001, Math.max(0, (side * 4.6 + 0.35 - t * 0.5)));
+      const i = Math.floor(v), f = v - i, th = BAYER[(x & 3) + 4 * (y & 3)] / 16;
+      px(g, x, y, 1, 1, tones[f > th ? Math.min(tones.length - 1, i + 1) : i]);
+    }
+  }
+  // ridges and gullies fanning out from the crater: a dark groove with a lit lip on its left
+  for (const k of [-2.4, -1.1, 1.6, 2.7]) {
+    let x = cx + Math.round(k * 8), y = peak + 6 + ri(r, 0, 10), fx = x;
+    const spread = k * 0.5, stop = base - 40 - ri(r, 0, 60);
+    for (let n = 0; y < stop; n++) {
+      const t = (y - peak) / (base - peak), side = (x - left[y - peak]) / Math.max(1, right[y - peak] - left[y - peak]);
+      if (x <= left[y - peak] + 4 || x >= right[y - peak] - 4) break;
+      if (hash(n, Math.round(k * 10)) % 7 !== 0) { px(g, x, y, 1, 2, side < 0.5 ? R.mid : R.deep); px(g, x - 1, y, 1, 2, side < 0.5 ? R.top : R.light); }
+      y += 2; fx += spread * (0.6 + t * 2) / 2 + Math.sin(y * 0.15 + k) * 0.35; x = Math.round(fx);
+    }
+  }
+  // layered rock ledges, curving with the cone
+  for (let i = 0; i < 16; i++) {
+    const y = ri(r, peak + 18, base - 60), L = left[y - peak], Rr = right[y - peak], a = ri(r, L + 8, Rr - 30), len = ri(r, 8, 22);
+    for (let x = a; x < Math.min(Rr - 6, a + len); x++) {
+      const side = (x - L) / (Rr - L), yy = y + Math.round((x - a) * (side < 0.5 ? 0.12 : -0.12));
+      px(g, x, yy, 1, 1, side < 0.45 ? R.top : side < 0.75 ? R.hi : R.light); if (hash(x, yy) % 3) px(g, x, yy + 1, 1, 1, side < 0.5 ? R.mid : R.deep);
+    }
+  }
+  // moss creeping up the lower slopes, in ragged patches
+  const nz = ART.noise2 || ((x, y) => (hash(Math.floor(x), Math.floor(y)) % 100) / 100);
+  for (let y = base - 96; y <= base; y++) {
+    const L = left[y - peak], Rr = right[y - peak], t = (y - (base - 96)) / 96;
+    for (let x = L; x <= Rr; x++) {
+      const v = 0.6 * nz(x / 7, y / 5) + 0.4 * nz(x / 2.5, y / 2.5) + t * 1.05 - 0.92, th = BAYER[(x & 3) + 4 * (y & 3)] / 16 * 0.18;
+      if (v <= th) continue;
+      const side = (x - L) / (Rr - L), fine = hash(x, y) % 9;
+      let col = side < 0.4 ? MOSS.light : side < 0.7 ? MOSS.mid : MOSS.dark;
+      if (fine === 0) col = side < 0.5 ? "#9ac85a" : MOSS.mid; else if (fine === 1) col = MOSS.dark;
+      px(g, x, y, 1, 1, col);
+      if (v > 0.25 && hash(x * 3, y * 5) % 37 === 0) { dot(g, x - 1, y - 1, "#9ac85a"); dot(g, x + 1, y - 1, "#9ac85a"); dot(g, x, y - 2, "#b8e07a"); }   // a little grass tuft
+    }
+  }
+  // the crater: a notched rim, a glowing throat, lava bubbling inside
+  ellipse(g, cx, peak + 2, crater + 2, 7, R.deep); ellipse(g, cx, peak + 1, crater, 5, R.dark);
+  ellipse(g, cx, peak + 2, crater - 6, 4, "#7a2a1a"); ellipse(g, cx, peak + 2, crater - 9, 3, "#d8481e"); ellipse(g, cx, peak + 2, crater - 14, 2, "#f28c28");
+  ellipse(g, cx - 2, peak + 2, crater - 20, 1, "#ffcf5e"); px(g, cx - 6, peak + 1, 7, 1, "#fff2a8");
+  for (let i = 0; i < 5; i++) { const bx = cx - 14 + i * 7, by = peak + 1 + (i % 2); disc(g, bx, by, 1, i % 2 ? "#ffcf5e" : "#f2602a"); }
+  for (let x = cx - crater; x <= cx + crater; x += 3) if (hash(x, 3) % 3 === 0) px(g, x, peak - 3 - (hash(x, 9) % 3), 3, 3, x < cx ? R.hi : R.mid);   // rocks on the rim
+  px(g, cx + 6, peak + 4, 9, 3, R.dark);                                                 // the notch the lava spills from
+  // one thick lava river: a glowing core, orange flanks, a crust that darkens as it cools, widening into a pool
+  let lx = cx + 10, ly = peak + 5, wd = 5;
+  const path = [];
+  while (ly < base - 18) {
+    path.push([lx, ly, wd]);
+    ly += 2; lx += Math.round(Math.sin(ly * 0.07) * 1.4 + 0.45); wd = Math.min(11, wd + 0.07);
+  }
+  for (const [x, y, ww] of path) {
+    const t = (y - peak) / (base - peak), half = Math.round(ww / 2);
+    px(g, x - half - 1, y, half * 2 + 3, 2, t < 0.6 ? "#5a1a10" : "#3a1610");
+    px(g, x - half, y, half * 2 + 1, 2, t < 0.55 ? "#e0502a" : t < 0.8 ? "#b83a22" : "#7a2a18");
+    px(g, x - Math.max(1, half - 2), y, Math.max(2, half * 2 - 3), 2, t < 0.45 ? "#ffb040" : t < 0.75 ? "#f2802a" : "#c8502a");
+    if (t < 0.5) px(g, x - 1, y, 2, 2, "#ffe890");
+    if (t > 0.45 && hash(x, y) % 5 === 0) px(g, x - half + ri(r, 0, half * 2), y, 2, 1, "#2a1a14");   // cooled crust floating on top
+  }
+  const [px0, py0] = path[path.length - 1];
+  ellipse(g, px0 + 2, py0 + 6, 16, 6, "#3a1610"); ellipse(g, px0 + 2, py0 + 5, 14, 4, "#7a2a18"); ellipse(g, px0 + 1, py0 + 5, 9, 2, "#c8502a"); px(g, px0 - 3, py0 + 4, 6, 1, "#f2802a");
+  for (let i = 0; i < 6; i++) px(g, px0 - 12 + i * 5, py0 + 9 + (i % 2), 3, 1, "#c8402a");      // glowing cracks in the cooled rock
+  // boulders tumbled down the slopes
+  for (let i = 0; i < 14; i++) {
+    const y = ri(r, peak + 60, base - 12), L = left[y - peak], Rr = right[y - peak], x = ri(r, L + 6, Rr - 6), rad = ri(r, 2, 4);
+    if (Math.abs(x - px0) < 14 && y > py0 - 10) continue;
+    const lit = (x - L) / (Rr - L) < 0.5;
+    disc(g, x + 1, y + 1, rad, R.deep); disc(g, x, y, rad, lit ? R.hi : R.light); disc(g, x - 1, y - 1, Math.max(1, rad - 2), lit ? R.top : R.hi); dot(g, x - 1, y - rad + 1, "#c8b8a8");
+  }
+  // the jungle at its foot: leafy bushes, palms and flowers
+  const pal = TREE_PAL.green, lime = TREE_PAL.lime;
+  for (let x = 6; x < W - 6; x += 11 + (hash(x, 4) % 5)) { const y = base - 6 - (hash(x, 5) % 7); ART.puff(g, x, y, 8 + (hash(x, 9) % 5), hash(x, 2) % 3 ? pal : lime, x); }
+  for (const [x, v, dy] of [[14, 1, 4], [70, 4, -6], [W - 66, 2, 2], [W - 118, 5, -10]]) g.drawImage(palmSprite(v), Math.round(x), base - 78 + dy);
+  for (let x = 10; x < W - 10; x += 7) { const y = base - 2 - (hash(x, 13) % 4); if (hash(x, 17) % 3 === 0) { px(g, x, y, 2, 2, ["#ff7eb6", "#ffe066", "#ffffff", "#c58aff"][hash(x, 19) % 4]); dot(g, x, y + 2, "#3f8f3a"); } }
 }
 function areaBuilding(kind, w, h, night, label, season) {
   const W = w * A + 2 * ART.OV, H = h * A + ART.TOPPAD;
@@ -739,7 +817,7 @@ function windowSpots(kind, w, h) {
   if (WEST[kind]) return [[0.8, h - 1.6], [w - 0.8, h - 1.6], [w / 2, h - 0.6]];
   if (kind === "lighthouse") return [[w / 2, 0.6]];
   if (kind === "mine") return [[w / 2 + 1.2, h - 1.8]];
-  if (kind === "volcano") return [];
+  if (kind === "volcano") return [[w / 2 + 0.2, 0.35]];      // the crater glows after dark
   if (kind === "tiki") return [[0.9, 2.8], [w - 0.9, 2.8]];
   const L = layout(kind, w, h), wy = L.roofRows + 0.9;
   return L.cols.map((t) => [t + 0.5, wy]);
