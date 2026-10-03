@@ -205,8 +205,8 @@ browser tabs reload by themselves.
   a pebble golem in the mines, a beaver kit chopping wood, a sproutling in the
   crop rows, a hedgehog, a glowbug, a mole, a slimeling, the Lil' Slime King,
   a fox kit, a golden chick, a calf, a kitchen mouse in a chef's hat, a frog,
-  a parrot and a star sprite: sixteen in all, from about 1 in 20 (wishes) to 1
-  in 3,000 (watering). Your odds get up to twice as good by level 100. The
+  a parrot and a star sprite: sixteen in all, from 1 in 100 (wishes) to 1 in
+  15,000 (watering). Your odds get up to twice as good by level 100. The
   whole farm hears when someone finds one. P shows them all: who follows
   you, who waits at home, and the mysteries still out there.
 * **The museum** collects bugs (catch them with a net), fish, fossils and

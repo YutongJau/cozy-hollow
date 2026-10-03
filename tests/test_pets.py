@@ -52,7 +52,7 @@ bumped = set(re.findall(r'bump\(p, "([a-z_]+)"', src)) | {"slimes", "bats", "cra
 dead = [k for k, spec in PT.PETS.items() if spec[2] not in bumped]
 check(not dead, "every pet's activity is counted somewhere in the game (no pet nobody can get): %s" % (dead or "all %d" % len(PT.PETS)))
 check(len(set(PT.BY_STAT)) == len(PT.PETS), "one pet per activity")
-check(all(spec[3] >= 20 for spec in PT.PETS.values()), "every pet is rare (1 in 20 at the very least)")
+check(all(spec[3] >= 100 for spec in PT.PETS.values()), "every pet is rare (1 in 100 at the very least)")
 
 # ---------------------------------------------------------------- the odds
 a["xp"] = 0
@@ -216,12 +216,14 @@ for stat, kind in PT.BY_STAT.items():
 check(all(k in cp["pets"] for k in PT.PETS), "all %d pets can drop" % len(PT.PETS))
 lucky(False)
 
-# ---------------------------------------------------------------- the real odds, roughly: 1 in 20 at level 0 for wishes
+# ---------------------------------------------------------------- the real odds, roughly: the rarest-but-one at level 0
 import random as _r     # noqa: E402
 PT.random = _r
 rng = _r.Random(5)
-hits = sum(1 for _ in range(40000) if rng.random() * c.pet_odds(dict(xp=0), "starling") < 1.0)
-check(1600 <= hits <= 2400, "a 1 in 20 pet drops about 2000 times in 40000 tries (%d)" % hits)
+odds = PT.PETS["starling"][3]
+tries = odds * 400
+hits = sum(1 for _ in range(tries) if rng.random() * c.pet_odds(dict(xp=0), "starling") < 1.0)
+check(320 <= hits <= 480, "a 1 in %d pet drops about 400 times in %d tries (%d)" % (odds, tries, hits))
 
 print("\n%d failure(s)" % len(fails) if fails else "\nall good")
 sys.exit(1 if fails else 0)
