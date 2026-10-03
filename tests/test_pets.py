@@ -41,6 +41,7 @@ def menu():
 
 now = time.time()
 w = W.World()
+w.created = now - 60                 # (a farm made just now: the season can't flip mid-test)
 w.coins = 5000
 w.join("A", now)
 w.join("B", now)
@@ -187,6 +188,7 @@ os.remove(fn)
 
 # ---------------------------------------------------------------- an older save: one pet, no collection
 old = W.World()
+old.created = now - 60
 old.join("Old", now)
 o = old.players["Old"]
 o["pet"] = dict(kind="dog", name="Rufus", loc="farm", x=o["x"], y=o["y"] + 1, f=[0, 1], love=12)
@@ -203,6 +205,7 @@ os.remove(fn)
 # ---------------------------------------------------------------- every activity can roll its pet
 lucky(True)
 c = W.World()
+c.created = now - 60
 c.join("C", now)
 cp = c.players["C"]
 c.out = []
