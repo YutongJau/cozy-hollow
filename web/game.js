@@ -2,11 +2,20 @@
    over a WebSocket. All pixel art lives in art.js (32px tiles). */
 "use strict";
 (function () {
-const $ = (s) => document.querySelector(s);
+const $q = {}, $ = (s) => $q[s] || ($q[s] = document.querySelector(s));   // the page's elements don't change, so look each up once
+// only touch the page when something actually changed: every write makes the browser redo style and layout, and the HUD is
+// refreshed on every update from the server (several a second while anyone walks)
+function setText(e, text) { if (e && e.textContent !== text) e.textContent = text; }
+function setStyle(e, prop, v) { if (e && e.style[prop] !== v) e.style[prop] = v; }
+function setTitle(e, v) { if (e && e.title !== v) e.title = v; }
+const hudSig = {};
+function changed(key, sig) { if (hudSig[key] === sig) return false; hudSig[key] = sig; return true; }
 const Art = window.ART;
 const A = Art.A;
 const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-let zoom = 2, SCALE = Math.round(zoom * dpr), T = A * SCALE;
+let rdpr = dpr;                       // the resolution we draw at: the screen's own, or 1 in smooth mode (see watchFrames)
+let zoom = 2, SCALE = Math.round(zoom * rdpr), T = A * SCALE;
+const RUN_MULT = 1.65;                // hold Shift to run
 const WALK_SPEED = 4.6;
 const COLORS = Art.COLORS, ITEM_HEX = Art.ITEM_HEX, SEASON = Art.SEASON, WOOD = Art.WOOD, OUT = Art.OUT;
 const blank = Art.blank, hash = Art.hash;
@@ -38,7 +47,7 @@ function groundOf(M) {
 let mode = "login";
 let menu = null, fishing = null;
 const viz = {};
-const my = { ready: false, x: 0, y: 0, tx: 0, ty: 0, stepping: false, dir: "down", dist: 0, lastSend: 0, lastTurn: 0, loc: "farm", queued: null };
+const my = { ready: false, x: 0, y: 0, tx: 0, ty: 0, stepping: false, dir: "down", dist: 0, lastSend: 0, lastTurn: 0, loc: "farm", queued: null, trail: [] };
 function curLoc() { return my.loc || "farm"; }
 function isArea(loc) { return !!(catalog && catalog.areas && catalog.areas[loc]); }
 function isOutdoor(loc) { return loc === "farm" || isArea(loc); }
@@ -52,9 +61,12 @@ let drops = [], fireflies = [], petals = [], smoke = [], butterflies = [], heart
 const swings = {};            // name -> {tool, start, x, y}
 let audio = null, music = null;
 const held = new Set();
-let lastDir = null;
+let lastDir = null, running = false, runDust = [], lastDust = 0;
 const prefs = { name: localStorage.getItem("cozy.name") || "", sprite: localStorage.getItem("cozy.sprite") || "girl",
   color: localStorage.getItem("cozy.color") || "pink", hat: localStorage.getItem("cozy.hat") || "cowboy" };
+let gfxPref = "";                       // "" (decide for me), "smooth" (draw at a lower resolution) or "crisp" (always full resolution)
+try { gfxPref = localStorage.getItem("cozy.gfx") || ""; } catch (e) { gfxPref = ""; }
+if (gfxPref === "smooth") { rdpr = 1; SCALE = Math.round(zoom * rdpr); T = A * SCALE; }
 const cowViz = {};            // cow id -> {x, y, tx, ty, f}
 let balloonViz = {};          // the floating present, glided between server ticks
 const fxs = [];               // objects in flight: lifted off a tile into someone's hands, or dropped onto one
@@ -172,7 +184,14 @@ function connect() {
   ws.onerror = () => { if (reconnectTries === 0) toast("Could not reach the farm server.", "warn"); };
 }
 function send(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
-if (location.hash === "#debug") window.cozyDebug = { handle: (m) => handle(m), state: () => state, me: () => me };   // for testing: feed the client a message by hand
+if (location.hash === "#debug") window.cozyDebug = { handle: (m) => handle(m), state: () => state, me: () => me, viz: () => viz,
+  bench: (n) => {   // render n frames back to back and report the average milliseconds spent in each part of the frame
+    PROF = {}; const t0 = performance.now(); let t = t0;
+    for (let i = 0; i < (n || 60); i++) { t += 16.7; profAt = performance.now(); profName = "setup"; renderFrame(t); profMark("flush"); ctx.getImageData(0, 0, 1, 1); profMark("end"); }
+    const out = { total: +((performance.now() - t0) / (n || 60)).toFixed(2) }; for (const k in PROF) out[k] = +(PROF[k] / (n || 60)).toFixed(2); PROF = null; return out;
+  } };
+let PROF = null, profAt = 0, profName = "";
+function profMark(name) { if (!PROF) return; const t = performance.now(); PROF[profName] = (PROF[profName] || 0) + t - profAt; profAt = t; profName = name; }   // for testing: feed the client a message by hand
 function handle(m) {
   if (m.t === "welcome") {
     if (window.__build && m.build && m.build !== window.__build) { location.reload(); return; }   // the farm was updated: fetch the new game
@@ -195,10 +214,10 @@ function handle(m) {
     const now = performance.now();
     for (const p of m.players) {
       if (p.name === prefs.name) { reconcile(p, now); continue; }
-      const v = viz[p.name] || (viz[p.name] = { x: p.x, y: p.y, tx: p.x, ty: p.y, dist: 0, facing: "down", moving: false, loc: p.loc });
-      if (v.loc !== (p.loc || "farm")) { v.loc = p.loc || "farm"; v.x = v.tx = p.x; v.y = v.ty = p.y; }
-      aim(v, p.x, p.y, now);
-      v.facing = facingName(p.facing);
+      const v = viz[p.name] || (viz[p.name] = { x: p.x, y: p.y, tx: p.x, ty: p.y, dist: 0, facing: "down", moving: false, loc: p.loc, path: [] });
+      if (v.loc !== (p.loc || "farm")) { v.loc = p.loc || "farm"; v.x = v.tx = p.x; v.y = v.ty = p.y; v.path = []; }
+      queueStep(v, p.x, p.y, now);
+      v.sfacing = facingName(p.facing);
     }
     for (const cw of m.cows || []) {
       const v = cowViz[cw.id] || (cowViz[cw.id] = { x: cw.x, y: cw.y, tx: cw.x, ty: cw.y, f: cw.f });
@@ -255,14 +274,20 @@ function handle(m) {
 function reconcile(p, now) {
   if (!my.ready) { my.ready = true; my.loc = p.loc || "farm"; my.x = my.tx = p.x; my.y = my.ty = p.y; my.dir = facingName(p.facing); cam.x = p.x + 0.5; cam.y = p.y + 0.5; cam.snap = true; return; }
   if ((p.loc || "farm") !== my.loc) {
-    const from = my.loc; my.loc = p.loc || "farm"; my.x = my.tx = p.x; my.y = my.ty = p.y; my.stepping = false; my.dir = facingName(p.facing); cam.snap = true; held.clear();
+    const from = my.loc; my.loc = p.loc || "farm"; my.x = my.tx = p.x; my.y = my.ty = p.y; my.stepping = false; my.dir = facingName(p.facing); cam.snap = true; held.clear(); my.trail.length = 0;
     if (isOutdoor(my.loc) && isOutdoor(from) && catalog.area_names) areaBanner = { text: catalog.area_names[my.loc].replace(/^the /, "The "), at: performance.now() };
     return;
   }
-  const stale = now - my.lastSend < 350;          // our latest step may not be in this snapshot yet
-  if ((p.x !== my.tx || p.y !== my.ty) && !stale) {
-    my.tx = p.x; my.ty = p.y;
-    if (Math.hypot(my.x - p.x, my.y - p.y) > 2) { my.x = p.x; my.y = p.y; my.stepping = false; } else my.stepping = true;
+  // the server may still be a few steps behind us (over the internet a reply can take a while): if where it has us is a tile
+  // we walked through recently, it's just catching up, so keep walking. Only a position off our path (a step it refused, a
+  // push, a teleport), or one that hasn't caught up a good while after our last step, puts us back where it says.
+  if (p.x === my.tx && p.y === my.ty) my.trail.length = 0;
+  else {
+    const behind = my.trail.includes(p.x + "," + p.y) && now - my.lastSend < 1500;
+    if (!behind) {
+      my.tx = p.x; my.ty = p.y; my.trail.length = 0;
+      if (Math.hypot(my.x - p.x, my.y - p.y) > 2) { my.x = p.x; my.y = p.y; my.stepping = false; } else my.stepping = true;
+    }
   }
   if (!held.size && !my.stepping) my.dir = facingName(p.facing);
 }
@@ -355,25 +380,26 @@ function skyLabel(h) {
 function updateHud() {
   if (!state) return;
   const st = state;
-  $("#farm-name").textContent = farmName;
-  $("#season").textContent = st.season[0].toUpperCase() + st.season.slice(1) + ", day " + st.day + " (year " + st.year + ")";
-  $("#clock").textContent = skyLabel(hourNow());
-  $("#weather").textContent = { sun: "Sunny", rain: "Raining", snow: "Snowing" }[st.weather];
-  $("#coins").textContent = st.coins + "g";
-  $("#online").textContent = st.players.filter((p) => p.online).length + " online";
+  setText($("#farm-name"), farmName);
+  setText($("#season"), st.season[0].toUpperCase() + st.season.slice(1) + ", day " + st.day + " (year " + st.year + ")");
+  setText($("#clock"), skyLabel(hourNow()));
+  setText($("#weather"), { sun: "Sunny", rain: "Raining", snow: "Snowing" }[st.weather]);
+  setText($("#coins"), st.coins + "g");
+  setText($("#online"), st.players.filter((p) => p.online).length + " online");
   if (me) {   // the little green farming xp bar under the tool bar
     const lo = 60 * me.level * me.level, hi = me.next_xp;
     const max = me.level >= (catalog.max_level || 1000) || hi == null || hi <= lo || me.xp >= hi;   // level 1000: nothing left to fill
     const pct = max ? 1 : Math.max(0, Math.min(1, (me.xp - lo) / (hi - lo)));
     const bar = $("#xpbar");
-    bar.querySelector(".fill").style.width = (pct * 100).toFixed(1) + "%";
-    bar.querySelector(".label").textContent = "Lv" + me.level + " " + me.title + " · " + (max ? "MAX" : Math.max(0, me.xp - lo) + " / " + (hi - lo) + " xp");
-    bar.title = me.next_unlock ? "Next - " + me.next_unlock : "farming experience";
+    setStyle($("#xpbar .fill"), "width", (pct * 100).toFixed(1) + "%");
+    setText($("#xpbar .label"), "Lv" + me.level + " " + me.title + " · " + (max ? "MAX" : Math.max(0, me.xp - lo) + " / " + (hi - lo) + " xp"));
+    setTitle(bar, me.next_unlock ? "Next - " + me.next_unlock : "farming experience");
     if (lastXp != null && me.xp > lastXp) { bar.classList.add("gain"); setTimeout(() => bar.classList.remove("gain"), 700); }
     lastXp = me.xp;
   }
-  const ul = $("#farmers ul"); ul.innerHTML = "";
-  st.players.filter((p) => p.online).sort((a, b) => a.name.localeCompare(b.name)).forEach((p) => {
+  const ul = $("#farmers ul"), online = st.players.filter((p) => p.online).sort((a, b) => a.name.localeCompare(b.name));
+  if (changed("farmers", JSON.stringify(online.map((p) => [p.name, p.level, p.title, p.spouse, p.sprite, p.color, p.hat])))) ul.innerHTML = "";
+  if (!ul.firstChild) online.forEach((p) => {
     const li = document.createElement("li");
     const c = blank(32, 48);
     c.getContext("2d").drawImage(charSprite(p.sprite || "boy", "down", 0, COLORS[catalog.player_colors[p.color % catalog.player_colors.length]], p.hat), 0, 0);
@@ -401,10 +427,10 @@ function updateHud() {
       slots.appendChild(d);
     }
   }
-  if (me) $("#can-top").textContent = "Can " + me.water + "/" + (me.can_cap || catalog.can) + " · Lv" + me.level;
-  if (me) { const bf = $("#buffs"), names = { speed: "\u26a1 Quick feet", luck: "\u2618 Lucky", angler: "\ud83c\udfa3 Steady hands", strength: "\u2694 Strong" }; bf.innerHTML = ""; for (const k in me.buffs || {}) bf.appendChild(el("span", null, names[k] + " " + fmt(me.buffs[k]))); }
+  if (me) setText($("#can-top"), "Can " + me.water + "/" + (me.can_cap || catalog.can) + " · Lv" + me.level);
+  if (me) { const bf = $("#buffs"), names = { speed: "\u26a1 Quick feet", luck: "\u2618 Lucky", angler: "\ud83c\udfa3 Steady hands", strength: "\u2694 Strong" }; if (changed("buffs", JSON.stringify(me.buffs || {}))) { bf.innerHTML = ""; for (const k in me.buffs || {}) bf.appendChild(el("span", null, names[k] + " " + fmt(me.buffs[k]))); } }
   const rv = st.revival;
-  if (rv) {   // the shared Valley Revival meter
+  if (rv && changed("revival", JSON.stringify(rv))) {   // the shared Valley Revival meter
     const fl = $("#revival .flowers"); fl.innerHTML = "";
     for (let i = 1; i <= 4; i++) fl.appendChild(el("i", i <= rv.stage ? "on" : "", "\u2740"));
     $("#revival .stage").textContent = rv.name;
@@ -412,8 +438,8 @@ function updateHud() {
     $("#revival .next").textContent = rv.next ? Math.min(rv.met, rv.need) + " of " + rv.need + " threads towards " + rv.next : "In Bloom - thank you, everyone!";
   }
   const q = st.quest;
-  $("#quest p").textContent = q ? q.who + " needs " + q.n + " " + catalog.items[q.item].name + " for " + q.reason + ". Reward " + q.reward + "g. (you have " + countItem(q.item) + ")" : "Nothing on the board right now.";
-  $("#here").textContent = describeHere();
+  setText($("#quest p"), q ? q.who + " needs " + q.n + " " + catalog.items[q.item].name + " for " + q.reason + ". Reward " + q.reward + "g. (you have " + countItem(q.item) + ")" : "Nothing on the board right now.");
+  setText($("#here"), describeHere());
 }
 function addLog(text, style) { logLines.push({ text: new Date().toTimeString().slice(0, 5) + " " + text, style, at: Date.now() }); if (logLines.length > 80) logLines.shift(); renderLog(); }
 setInterval(() => { const cut = Date.now() - 30000; const before = logLines.length; logLines = logLines.filter((l) => !l.at || l.at > cut); if (logLines.length !== before) renderLog(); }, 1000);
@@ -692,7 +718,7 @@ function renderMenu(fresh) {
     body.innerHTML = "<p><kbd>WASD</kbd> or arrows to walk. You act on the tile you stand on; the pond, shop, bin, board, well, mailbox and trees are used by facing them (they glow).</p>" +
       "<p><kbd>E</kbd> or <kbd>Space</kbd> does the natural thing: till grass, plant the seed in hand, water, harvest, pick forage, refill the can at the pond or well, open the shop / bin / board.</p>" +
       "<p><kbd>F</kbd> fishes when facing the pond: keep the fish inside your net with <kbd>&larr;</kbd> <kbd>&rarr;</kbd> or the mouse.</p>" +
-      "<p><kbd>X</kbd> clears the tile you stand on, or picks up the storage chest you face (carry it and press <kbd>E</kbd> to set it down). <kbd>1</kbd>-<kbd>9</kbd> pick what you hold, <kbd>I</kbd> opens the bag, <kbd>J</kbd> the journal, <kbd>L</kbd> your quest log, <kbd>K</kbd> the Valley Book, <kbd>N</kbd> the valley map (Father TongTong gives you one), <kbd>T</kbd> chats, <kbd>M</kbd> music (and the songs Rowan teaches you), <kbd>+</kbd>/<kbd>-</kbd> zoom.</p>" +
+      "<p><kbd>X</kbd> clears the tile you stand on, or picks up the storage chest you face (carry it and press <kbd>E</kbd> to set it down). <kbd>1</kbd>-<kbd>9</kbd> pick what you hold, <kbd>I</kbd> opens the bag, <kbd>J</kbd> the journal, <kbd>L</kbd> your quest log, <kbd>K</kbd> the Valley Book, <kbd>N</kbd> the valley map (Father TongTong gives you one), <kbd>T</kbd> chats, <kbd>M</kbd> music (and the songs Rowan teaches you), <kbd>+</kbd>/<kbd>-</kbd> zoom, <kbd>G</kbd> smooth or crisp graphics. Hold <kbd>Shift</kbd> while you walk to run.</p>" +
       "<p>Explore the valley: walk off the farm's paths west to <b>Hollow Town</b> (shops, saloon, museum, folks to talk to), north to <b>Summit Ridge</b> and its <b>mine</b> (break ore and gems with the pickaxe, ladders go deeper), south to the <b>Whisperwood</b>. From town go south to <b>Driftwood Beach</b>, where a boat at the pier sails to <b>Palm Isle</b>; the stagecoach in town rides to <b>Dusty Gulch</b>. Fish in rivers, lakes and the sea, and forage what each place grows.</p>" +
       "<p><b>Folks and festivals.</b> Villagers walk to work, the shops and home on the clock. Face one and press <kbd>E</kbd> to chat; press it again holding something to give it as a gift (everyone has favourites). On festival days the town square fills up: talk to Mayor Hazel for the line dance, the rodeo, the livestock fair, Fallfest, the fishing derby or the winter feast. The <b>Town Hall</b> takes donations for projects that grow the town and bring new neighbours.</p>" +
       "<p><b>Quests and levels.</b> A <b>!</b> over a villager means they have a favor to ask or a story to share; a <b>?</b> means you have what they asked for. <kbd>L</kbd> shows your quest log and what your next level unlocks. Levels open new seeds, saplings, recipes and deeper mine floors, and fruit trees grow only in the marked tree spots in the orchard meadow south of the fields - more spots open as you level.</p>" +
@@ -760,6 +786,7 @@ function updateFishing(dt) {
 const DIRS = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", w: "up", s: "down", a: "left", d: "right", W: "up", S: "down", A: "left", D: "right" };
 const DELTA = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 window.addEventListener("keydown", (e) => {
+  running = e.shiftKey;
   if (mode === "login") return;
   if (mode === "chat") {
     if (e.key === "Escape") { closeChat(); e.preventDefault(); }
@@ -809,13 +836,14 @@ window.addEventListener("keydown", (e) => {
   else if (e.key === "j" || e.key === "J") send({ t: "journal" });
   else if (e.key === "?" || e.key === "h" || e.key === "H") openMenu("help", {});
   else if (e.key === "m" || e.key === "M") toggleMusic();
+  else if (e.key === "g" || e.key === "G") toggleGfx();
   else if (e.key === "+" || e.key === "=" || e.code === "Equal" || e.code === "NumpadAdd") setZoom(zoom + 1);
   else if (e.key === "-" || e.key === "_" || e.code === "Minus" || e.code === "NumpadSubtract") setZoom(zoom - 1);
 });
-window.addEventListener("keyup", (e) => { if (DIRS[e.key]) held.delete(DIRS[e.key]); });
-window.addEventListener("blur", () => held.clear());
+window.addEventListener("keyup", (e) => { running = e.shiftKey; if (DIRS[e.key]) held.delete(DIRS[e.key]); });
+window.addEventListener("blur", () => { held.clear(); running = false; });
 document.addEventListener("visibilitychange", () => { if (!document.hidden) { cam.snap = true; lastFrame = performance.now(); } });
-function setZoom(z) { zoom = Math.max(1, Math.min(4, z)); SCALE = Math.round(zoom * dpr); T = A * SCALE; cam.snap = true; }
+function setZoom(z) { zoom = Math.max(1, Math.min(4, z)); SCALE = Math.round(zoom * rdpr); T = A * SCALE; cam.snap = true; }
 function openChat(prefill) { mode = "chat"; held.clear(); $("#chatbox").classList.remove("hidden"); $("#hint").classList.add("hidden"); const i = $("#chat"); i.value = prefill; i.focus(); }
 function closeChat() { mode = "play"; $("#chatbox").classList.add("hidden"); $("#hint").classList.remove("hidden"); $("#chat").blur(); canvas.focus(); }
 function submitChat() {
@@ -827,7 +855,7 @@ canvas.addEventListener("click", (e) => {
   if (mode === "chat") closeChat();
   canvas.focus();
   if (mode !== "play" || !my.ready) return;
-  const r = canvas.getBoundingClientRect(), mx = (e.clientX - r.left) * dpr, my_ = (e.clientY - r.top) * dpr;
+  const r = canvas.getBoundingClientRect(), mx = (e.clientX - r.left) * rdpr, my_ = (e.clientY - r.top) * rdpr;
   const tx = Math.floor((mx - _ox) / T), ty = Math.floor((my_ - _oy) / T);
   const dx = tx - my.tx, dy = ty - my.ty;
   if (dx === 0 && dy === 0) { send({ t: "interact" }); return; }
@@ -845,8 +873,10 @@ canvas.addEventListener("click", (e) => {
 function updateSelf(dt, now) {
   if (!my.ready) return;
   if (state && state.wedding) { my.stepping = false; return; }
-  const mp = myPlayer(), boost = (mp && mp.riding ? 1.8 : 1) * (me && me.buffs && me.buffs.speed > 0 ? 1.3 : 1);
+  const mp = myPlayer(), run = running && held.size > 0 && !(mp && mp.riding);
+  const boost = (mp && mp.riding ? 1.8 : 1) * (me && me.buffs && me.buffs.speed > 0 ? 1.3 : 1) * (run ? RUN_MULT : 1);
   let budget = WALK_SPEED * boost * dt;
+  if (run && my.stepping && now - lastDust > 130 && isOutdoor(curLoc())) { lastDust = now; runDust.push({ x: my.x + 0.5, y: my.y + 0.92, t0: now, loc: curLoc() }); }
   for (let i = 0; i < 3; i++) {
     if (!my.stepping) {
       if (mode !== "play") break;
@@ -868,7 +898,10 @@ function tryStep(dir, now = performance.now()) {
   const rows = curMap(), ch = (rows[ny] || "")[nx];
   const teleport = portals.has(curLoc() + "," + nx + "," + ny);
   if (teleport) { if (now - my.lastTurn > 400) { my.lastTurn = now; my.lastSend = now; send({ t: "move", dx: ddx, dy: ddy }); } return true; }
-  if (walkable(nx, ny)) { my.tx = nx; my.ty = ny; my.stepping = true; my.lastSend = now; send({ t: "move", dx: ddx, dy: ddy }); return true; }
+  if (walkable(nx, ny)) {
+    my.trail.push(my.tx + "," + my.ty); if (my.trail.length > 16) my.trail.shift();
+    my.tx = nx; my.ty = ny; my.stepping = true; my.lastSend = now; send({ t: "move", dx: ddx, dy: ddy }); return true;
+  }
   if (now - my.lastTurn > 250) { my.lastTurn = now; my.lastSend = now; send({ t: "move", dx: ddx, dy: ddy }); }
   return true;
 }
@@ -908,17 +941,67 @@ function blob(sx, sy, same, under, fill, edge, bumpy) {
     bump(bx, by, br);
   });
 }
+// ------------------------------------------------------------------ keeping it smooth
+// If the browser can't keep up at the screen's full resolution (a big window on a high-density screen with a modest graphics
+// chip), draw at a lower resolution instead: the pixel art looks just the same scaled up, and every frame costs a quarter as much.
+const frameWatch = { last: 0, n: 0, sum: 0, slow: 0 };
+function watchFrames(now) {
+  const dt = now - frameWatch.last; frameWatch.last = now;
+  if (dt <= 0 || dt > 100 || document.hidden || mode === "login") return;      // a hidden or throttled tab doesn't count
+  frameWatch.n++; frameWatch.sum += dt;
+  if (frameWatch.n < 90) return;
+  const avg = frameWatch.sum / frameWatch.n; frameWatch.n = 0; frameWatch.sum = 0;
+  frameWatch.slow = avg > 21 ? frameWatch.slow + 1 : 0;                        // slower than ~48 frames a second
+  if (frameWatch.slow >= 2 && !gfxPref && rdpr > 1) setSmooth(true, "The game was struggling to keep up, so it's drawing at a lower resolution now (G switches back).");
+}
+function setSmooth(on, why) {
+  rdpr = on ? 1 : dpr; setZoom(zoom); padsAt = 0; frameWatch.slow = 0;
+  if (why) { toast(why); addLog(why, "event"); }
+}
+function toggleGfx() {
+  const smooth = rdpr > 1;
+  gfxPref = smooth ? "smooth" : "crisp";
+  try { localStorage.setItem("cozy.gfx", gfxPref); } catch (e) { /* private window: just for now then */ }
+  setSmooth(smooth, smooth ? "Smooth mode: drawing at a lower resolution for the best frame rate. (G for crisp)" : "Crisp mode: drawing at your screen's full resolution. (G for smooth)");
+}
+// Sprites are painted the first time they're needed; painting a villager's whole walk cycle takes a few milliseconds, which
+// would stutter the frame they first appear in. So when the browser is idle we paint everyone's frames ahead of time.
+const warmQueue = [], warmed = new Set();
+function warmFarmer(sprite, color, hat) {
+  const key = sprite + "|" + color + "|" + hat;
+  if (warmed.has(key)) return;
+  warmed.add(key);
+  const shirt = COLORS[catalog.player_colors[color % catalog.player_colors.length]] || "#3fc1e6";
+  const hatArg = hat && hat !== "cowboy" && hat !== "none" && Art.hatSprite && Art.hatSprite(hat, "down") ? "none" : hat;
+  for (const f of ["down", "left", "right", "up"]) for (let fr = 0; fr <= 8; fr++) warmQueue.push(() => charSprite(sprite, f, fr, shirt, hatArg, false));
+}
+function warmAll() {
+  if (!catalog || !state) return;
+  for (const p of state.players) if (p.online) warmFarmer(p.sprite || "boy", p.color, p.hat);
+  for (const n of state.npcs || []) {
+    const look = (catalog.npcs || {})[n.n] || ["boy", "white", "none"], own = Art.LOOKS && Art.LOOKS[n.n];
+    warmFarmer(own ? n.n : look[0], Math.max(0, (catalog.player_colors || []).indexOf(look[1])), own ? "none" : look[2]);
+  }
+}
+const idle = window.requestIdleCallback || ((f) => setTimeout(() => f({ timeRemaining: () => 8 }), 50));
+function warmStep(deadline) {
+  while (warmQueue.length && deadline.timeRemaining() > 2) warmQueue.shift()();
+  idle(warmStep, { timeout: 1000 });
+}
+idle(warmStep, { timeout: 1000 });
+setInterval(warmAll, 3000);
 function render(now) {
   requestAnimationFrame(render);
+  watchFrames(now);
   try { renderFrame(now); } catch (e) { ctx.globalCompositeOperation = "source-over"; ctx.restore(); if (!window.__renderErr) { window.__renderErr = String(e && e.stack || e); console.error(e); } }
 }
 function renderFrame(now) {
-  const dt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
+  const dt = Math.max(0, Math.min(0.1, (now - lastFrame) / 1000)); lastFrame = Math.max(lastFrame, now);
   pruneFx(now);
   if (mode === "fish") updateFishing(dt);
   if (!state || !map.length) return;
   updateSelf(dt, now);
-  glideAll(viz, WALK_SPEED * 0.9, dt); glideAll(npcViz, 1.6, dt); glideAll(chickViz, 2.2, dt); glideAll(petViz, WALK_SPEED, dt); glideAll(compViz, WALK_SPEED, dt);
+  for (const k in viz) walkPath(viz[k], dt); glideAll(npcViz, 1.6, dt); glideAll(chickViz, 2.2, dt); glideAll(petViz, WALK_SPEED, dt); glideAll(compViz, WALK_SPEED, dt);
   glideAll(mobViz, 1.8, dt); glideAll(critViz, 2.5, dt); glideAll(cowViz, 0.9, dt);
   if (state.balloon) { const b = state.balloon, v = balloonViz.id === b.id ? balloonViz : (balloonViz = { id: b.id, x: b.x, y: b.y, tx: b.x, ty: b.y }); aim(v, b.x, b.y, now); glide1(v, 0.2, dt); }
   updateHudLive(now);
@@ -928,7 +1011,7 @@ function renderFrame(now) {
   const rvs = (state.revival || {}).stage || 0, town = loc === "town";   // the Valley Revival stage: the town looks worn until it wakes
   RM = M; RG = groundOf(M);
   const cell = (x, y) => (M[y] || "")[x] || "#", gcell = (x, y) => (RG[y] || [])[x] || "#";
-  const cw = Math.floor(canvas.clientWidth * dpr), ch = Math.floor(canvas.clientHeight * dpr);
+  const cw = Math.floor(canvas.clientWidth * rdpr), ch = Math.floor(canvas.clientHeight * rdpr);
   if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
   ctx.imageSmoothingEnabled = false;
   waterAcc += dt; if (waterAcc > 0.45) { waterAcc = 0; waterFrame = (waterFrame + 1) % 3; }
@@ -949,6 +1032,7 @@ function renderFrame(now) {
   const under = base ? Art.GROUND2[base].base : s.grass;
   const rockKind = (c) => c === "R" ? "cave" : loc === "frontier" ? "frontier" : "mountain";
   ctx.fillStyle = cave ? "#120e0b" : "#1e2a1e"; ctx.fillRect(0, 0, cw, ch);
+  profMark("ground");
   // 1. ground: the area's base everywhere first (grass, desert or cave floor), then the blobby ground types on top
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
     const img = base ? Art.GROUND2[base].tile(hash(x, y)) : Art.grassTile(season, hash(x, y) % 24, Math.round((Art.noise2(x, y) - 0.5) * 5));
@@ -1003,6 +1087,7 @@ function renderFrame(now) {
   }
   ctx.fillStyle = cave ? "rgba(0,0,0,.35)" : "rgba(30,20,10,.22)";
   for (const [fx, fy] of faces) { ctx.fillRect(fx, fy, T, 5 * SCALE); ctx.fillRect(fx, fy + 5 * SCALE, T, 3 * SCALE); }
+  profMark("props");
   // 2. soil, props, crops, forage and ore, trees as depth-sorted entities
   const ents = [];
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
@@ -1061,6 +1146,7 @@ function renderFrame(now) {
       if (ad && ad.o) ents.push({ y: y + 0.3, draw: () => ctx.drawImage(Art.oreSprite(ad.o, cave, h), sx, sy, T, T) });
     }
   }
+  profMark("life");
   // 2b. life in the valley: machines, chests, bugs, dig spots, villagers, animals, monsters, game, festivals
   const inView = (x, y) => x >= x0 - 2 && x <= x1 + 2 && y >= y0 - 3 && y <= y1 + 3;
   const tl = farm ? tiles : ATL;
@@ -1095,6 +1181,7 @@ function renderFrame(now) {
     ents.push({ y: hy + 0.3, draw: () => { ctx.drawImage(Art.iconCanvas(state.hunt.kind, catalog), sx + 7 * SCALE, sy + 9 * SCALE + bob, 18 * SCALE, 18 * SCALE); if (Math.floor(now / 400 + hx + hy) % 4 === 0) { ctx.fillStyle = "#ffffff"; ctx.fillRect(sx + 22 * SCALE, sy + 8 * SCALE, 2 * SCALE, 2 * SCALE); } } });
   }
   else if (town && rvs >= 2) revivalDecor(rvs, ents, ox, oy, now, nightAlpha());
+  profMark("buildings");
   // 3. buildings: shadows, the farmhouse porch and smoke, then the sprites as depth-sorted entities
   const blds = farm ? buildings.concat(extraBuildings("farm")) : areaBuildings(loc);
   for (const b of blds) {
@@ -1120,6 +1207,7 @@ function renderFrame(now) {
   for (const sm of smoke) { sm.y -= 0.35 * dt; sm.x += sm.vx * dt; sm.a -= 0.1 * dt; sm.r += 1.4 * dt; }
   smoke = smoke.filter((sm) => sm.a > 0);
   if (farm) for (const sm of smoke) { ctx.fillStyle = "rgba(240,240,244," + sm.a + ")"; ctx.beginPath(); ctx.arc(ox + sm.x * T, oy + sm.y * T, sm.r * SCALE, 0, 6.3); ctx.fill(); }
+  profMark("highlight");
   // 4. facing highlight
   const meP = myPlayer();
   if (meP) {
@@ -1130,6 +1218,7 @@ function renderFrame(now) {
       ctx.strokeRect(ox + fx * T + 2 * SCALE, oy + fy * T + 2 * SCALE, T - 4 * SCALE, T - 4 * SCALE);
     }
   }
+  profMark("entities");
   // 5. entities sorted by row: the chest, cows, wedding guests, farmers
   if (farm) for (const chs of state.chests || []) {
     if (chs.x < x0 - 1 || chs.x > x1 + 1 || chs.y < y0 - 1 || chs.y > y1 + 1 || inFlight(chs.x, chs.y, now) || chestLifting(chs.x, chs.y, now)) continue;
@@ -1171,10 +1260,13 @@ function renderFrame(now) {
   }
   for (const p of state.players) {
     if (!p.online || (p.loc || "farm") !== loc) continue;
-    if (p.name === prefs.name) { if (my.ready) ents.push({ y: my.y + 0.9, draw: () => drawFarmer(p, my.x, my.y, my.dir, my.stepping ? 1 + Math.floor(my.dist * 4) % 7 : 0, ox, oy, now, heldItem()) }); continue; }
+    if (p.name === prefs.name) { if (my.ready) ents.push({ y: my.y + 0.9, draw: () => drawFarmer(p, my.x, my.y, my.dir, my.stepping ? 1 + Math.floor(my.dist * 4) % 8 : 0, ox, oy, now, heldItem()) }); continue; }
     const v = viz[p.name]; if (!v) continue;
-    ents.push({ y: v.y + 0.9, draw: () => drawFarmer(p, v.x, v.y, v.facing, v.moving ? 1 + Math.floor(v.dist * 4) % 7 : 0, ox, oy, now, p.held) });
+    ents.push({ y: v.y + 0.9, draw: () => drawFarmer(p, v.x, v.y, v.facing, v.moving ? 1 + Math.floor(v.dist * 4) % 8 : 0, ox, oy, now, p.held) });
   }
+  runDust = runDust.filter((d) => now - d.t0 < 420);              // little puffs at a runner's heels
+  for (const d of runDust) if (d.loc === loc) { const u = (now - d.t0) / 420; ctx.save(); ctx.globalAlpha = 0.7; dust(ox + d.x * T, oy + d.y * T, u * 0.8); ctx.restore(); }
+  for (const name in viz) { const v = viz[name]; if (v.fast && v.loc === loc && now - (v.lastDust || 0) > 130) { v.lastDust = now; runDust.push({ x: v.x + 0.5, y: v.y + 0.92, t0: now, loc }); } }
   ents.sort((a, b) => a.y - b.y).forEach((e) => {
     if (e.tree) {
       ctx.fillStyle = "rgba(0,0,0,.2)"; ctx.beginPath(); ctx.ellipse(e.sx + T / 2, e.sy + T - 2 * SCALE, 18 * SCALE, 6 * SCALE, 0, 0, 6.3); ctx.fill();
@@ -1192,6 +1284,7 @@ function renderFrame(now) {
   });
   drawFx(now, ox, oy);
   drawFlying(loc, ox, oy, now);
+  profMark("ambient");
   // 6. ambient life
   if (!cave && night < 0.1 && hourNow() > 7 && hourNow() < 18.5 && weather === "sun" && season !== "winter") {
     while (butterflies.length < 5) butterflies.push({ x: Math.random() * mapW, y: Math.random() * mapH, p: Math.random() * 6.3, c: ["#fff8d0", "#ffd0e8", "#d8f0ff"][butterflies.length % 3] });
@@ -1213,6 +1306,7 @@ function renderFrame(now) {
     }
   } else petals = [];
   if (!wd) hearts = [];
+  profMark("weather");
   // 7. weather
   if (weather !== "sun") {
     const rain = weather === "rain";
@@ -1226,6 +1320,7 @@ function renderFrame(now) {
     }
     ctx.fillStyle = rain ? "rgba(40,60,90,.2)" : "rgba(220,230,240,.1)"; ctx.fillRect(0, 0, cw, ch);
   } else drops = [];
+  profMark("sky");
   // 8. sky: sunrise, sunset, dusk and night tints (caves are always dark); warm glows from lamps, windows and farmers
   if (cave) { ctx.fillStyle = "rgba(8,6,10,.56)"; ctx.fillRect(0, 0, cw, ch); }
   else { const tint = skyTint(hourNow()); if (tint[3] > 0.005) { ctx.fillStyle = "rgba(" + Math.round(tint[0]) + "," + Math.round(tint[1]) + "," + Math.round(tint[2]) + "," + tint[3].toFixed(3) + ")"; ctx.fillRect(0, 0, cw, ch); } }
@@ -1243,16 +1338,14 @@ function renderFrame(now) {
         const u = i / n, qx = (1 - u) * (1 - u) * p0.x + 2 * (1 - u) * u * midx + u * u * p1.x, qy = (1 - u) * (1 - u) * p0.y + 2 * (1 - u) * u * midy + u * u * p1.y;
         const tw = 0.8 + 0.2 * Math.sin(now / 350 + i * 1.7 + ax);
         const col = ["255,236,170", "255,200,230", "200,230,255", "255,220,150"][i % 4];
-        const g = ctx.createRadialGradient(qx, qy, 0, qx, qy, 9 * SCALE); g.addColorStop(0, "rgba(" + col + "," + 0.9 * tw * night + ")"); g.addColorStop(0.3, "rgba(" + col + "," + 0.35 * tw * night + ")"); g.addColorStop(1, "rgba(" + col + ",0)");
-        ctx.fillStyle = g; ctx.fillRect(qx - 9 * SCALE, qy - 9 * SCALE, 18 * SCALE, 18 * SCALE);
+        drawGlow(glowTex("bulb" + col, [[0, col, 0.9], [0.3, col, 0.35], [1, col, 0]]), qx, qy, 9 * SCALE, tw * night);
         ctx.fillStyle = "rgba(255,255,240," + Math.min(1, 0.9 * tw + 0.2) + ")"; ctx.fillRect(qx - SCALE, qy - SCALE, 2 * SCALE, 2 * SCALE);
       }
     }
     const glow = (gx, gy, r, a, inner) => {
-      if (!isFinite(gx) || !isFinite(gy) || !isFinite(r) || r <= 0) return;
-      const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, r);
-      g.addColorStop(0, "rgba(255,236,170," + a * (inner || 1) + ")"); g.addColorStop(0.35, "rgba(255,200,110," + a * 0.55 + ")"); g.addColorStop(1, "rgba(255,170,80,0)");
-      ctx.fillStyle = g; ctx.fillRect(gx - r, gy - r, 2 * r, 2 * r);
+      if (!isFinite(gx) || !isFinite(gy) || !isFinite(r) || r <= 0 || a <= 0) return;
+      const k = Math.min(1, inner || 1);
+      drawGlow(glowTex("lamp" + k, [[0, "255,236,170", k], [0.35, "255,200,110", 0.55], [1, "255,170,80", 0]]), gx, gy, r, a);
     };
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       const ch_ = M[y][x];
@@ -1314,6 +1407,7 @@ function renderFrame(now) {
     }
     ctx.globalCompositeOperation = "source-over";
   } else fireflies = [];
+  profMark("labels");
   // 9. priest bubble, wedding banner and confetti, names and bubbles
   if (farm && state.priest && state.priest.bubble) drawBubble(ox + state.priest.x * T + T / 2, oy + state.priest.y * T - 20 * SCALE, state.priest.bubble);
   if (wd) {
@@ -1361,12 +1455,22 @@ function drawBanner(now, cw) {
   ctx.fillStyle = "#3a2a1a"; ctx.fillText(areaBanner.text, cw / 2, y + h / 2 + SCALE / 2);
   ctx.restore();
 }
+let padsAt = 0, padsFor = 0, padsCache = null;
+window.addEventListener("resize", () => { padsAt = 0; });
 function hudPads() {
   // Screen-space bands (device px) covered by the HUD, so the camera keeps the farmer in the uncovered part of the canvas.
+  // Reading where things are on the page is slow if anything changed since, so it's remembered for half a second.
+  const t = performance.now();
+  if (padsCache && t - padsAt < 500 && padsFor === rdpr) return Object.assign({}, padsCache);
+  padsAt = t; padsFor = rdpr;
+  padsCache = measurePads();
+  return Object.assign({}, padsCache);
+}
+function measurePads() {
   const r = canvas.getBoundingClientRect();
   const side = $("#side").getBoundingClientRect(), here = $("#here").getBoundingClientRect(), top = $("#topbar").getBoundingClientRect();
   const sideCovers = side.width > 0 && side.left < r.right;
-  return { l: 0, r: sideCovers ? Math.max(0, r.right - side.left + 8) * dpr : 0, t: Math.max(0, top.bottom - r.top) * dpr, b: here.width > 0 ? Math.max(0, r.bottom - here.top + 6) * dpr : 0 };
+  return { l: 0, r: sideCovers ? Math.max(0, r.right - side.left + 8) * rdpr : 0, t: Math.max(0, top.bottom - r.top) * rdpr, b: here.width > 0 ? Math.max(0, r.bottom - here.top + 6) * rdpr : 0 };
 }
 function camTarget(mapW, mapH, cw, ch, fx, fy) {
   const p = hudPads();
@@ -1378,9 +1482,35 @@ function camTarget(mapW, mapH, cw, ch, fx, fy) {
   const ty = mapH * T <= visH ? mapH / 2 - cyo / T : Math.max((ch / 2 - p.t) / T, Math.min(mapH - (ch / 2 - p.b) / T, fy - cyo / T));
   return [tx, ty];
 }
+// lights at night: a soft glow painted once into a small picture, then stretched and faded for every lamp, window and bulb
+// (working out a gradient for every pixel of every glow, every frame, is the slowest thing a frame can do)
+const _glows = {};
+function glowTex(key, stops) {
+  if (_glows[key]) return _glows[key];
+  const c = blank(64, 64), g = c.getContext("2d"), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  for (const [at, col, a] of stops) gr.addColorStop(at, "rgba(" + col + "," + a + ")");
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  return (_glows[key] = c);
+}
+function drawGlow(tex, x, y, r, a) {
+  const was = ctx.globalAlpha;
+  ctx.globalAlpha = Math.min(1, was * a); ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(tex, x - r, y - r, 2 * r, 2 * r);
+  ctx.imageSmoothingEnabled = false; ctx.globalAlpha = was;
+}
+const _vignettes = {};
+function vignette(w, h) {
+  /* the warm-centred, dark-edged glow over a room, painted once per room size at 8 pixels a tile */
+  const key = w + "x" + h;
+  if (_vignettes[key]) return _vignettes[key];
+  const c = blank(w * 8, h * 8), g = c.getContext("2d");
+  const gr = g.createRadialGradient(w * 4, h * 4, 8, w * 4, h * 4, Math.max(w, h) * 8);
+  gr.addColorStop(0, "rgba(255,200,120,0)"); gr.addColorStop(1, "rgba(20,10,0,.45)"); g.fillStyle = gr; g.fillRect(0, 0, w * 8, h * 8);
+  return (_vignettes[key] = c);
+}
 function renderInterior(now, dt) {
   const rows = curMap(), loc = curLoc();
-  const cw = Math.floor(canvas.clientWidth * dpr), ch = Math.floor(canvas.clientHeight * dpr);
+  const cw = Math.floor(canvas.clientWidth * rdpr), ch = Math.floor(canvas.clientHeight * rdpr);
   if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
   ctx.imageSmoothingEnabled = false;
   const mapW = rows[0].length, mapH = rows.length;
@@ -1415,16 +1545,17 @@ function renderInterior(now, dt) {
   }
   for (const p of state.players) {
     if (!p.online || (p.loc || "farm") !== loc) continue;
-    if (p.name === prefs.name) { ents.push({ y: my.y + 0.9, draw: () => drawFarmer(p, my.x, my.y, my.dir, my.stepping ? 1 + Math.floor(my.dist * 4) % 7 : 0, ox, oy, now, heldItem()) }); continue; }
+    if (p.name === prefs.name) { ents.push({ y: my.y + 0.9, draw: () => drawFarmer(p, my.x, my.y, my.dir, my.stepping ? 1 + Math.floor(my.dist * 4) % 8 : 0, ox, oy, now, heldItem()) }); continue; }
     const v = viz[p.name]; if (!v) continue;
-    ents.push({ y: v.y + 0.9, draw: () => drawFarmer(p, v.x, v.y, v.facing, v.moving ? 1 + Math.floor(v.dist * 4) % 7 : 0, ox, oy, now, p.held) });
+    ents.push({ y: v.y + 0.9, draw: () => drawFarmer(p, v.x, v.y, v.facing, v.moving ? 1 + Math.floor(v.dist * 4) % 8 : 0, ox, oy, now, p.held) });
   }
   ents.sort((a, b) => a.y - b.y).forEach((e) => e.draw());
   const meP = myPlayer();
   if (meP) { const fx = meP.x + meP.facing[0], fy = meP.y + meP.facing[1], c = (rows[fy] || "")[fx]; if (c && "btcfFkpSqhoxWndai".includes(c)) { ctx.strokeStyle = "rgba(255,250,200," + (0.35 + 0.3 * Math.sin(now / 200)) + ")"; ctx.lineWidth = SCALE; ctx.strokeRect(ox + fx * T + 2 * SCALE, oy + fy * T + 2 * SCALE, T - 4 * SCALE, T - 4 * SCALE); } }
   // warm lamp light and a soft vignette
-  const g = ctx.createRadialGradient(ox + mapW * T / 2, oy + mapH * T / 2, T, ox + mapW * T / 2, oy + mapH * T / 2, Math.max(mapW, mapH) * T);
-  g.addColorStop(0, "rgba(255,200,120,0)"); g.addColorStop(1, "rgba(20,10,0,.45)"); ctx.fillStyle = g; ctx.fillRect(0, 0, cw, ch);
+  ctx.imageSmoothingEnabled = true;      // the vignette is soft, so a small one stretched over the room looks the same and costs far less
+  ctx.drawImage(vignette(mapW, mapH), ox, oy, mapW * T, mapH * T);
+  ctx.imageSmoothingEnabled = false;
   for (const p of state.players) {
     if (!p.online || (p.loc || "farm") !== loc) continue;
     const v = p.name === prefs.name ? my : viz[p.name]; if (!v) continue;
@@ -1559,6 +1690,32 @@ function glide1(v, minSpeed, dt) {
   v.moving = v.still < 0.15;                         // keep walking through the blink between two steps (no flicker to the standing pose)
 }
 function glideAll(store, minSpeed, dt) { for (const k in store) glide1(store[k], minSpeed, dt); }
+function queueStep(v, x, y, now) {
+  /* another farmer's new tile: queue it, so we walk the same path they did (round corners, not across them) */
+  const last = v.path.length ? v.path[v.path.length - 1] : [v.tx, v.ty];
+  if (last[0] === x && last[1] === y) return;
+  if (Math.abs(last[0] - x) + Math.abs(last[1] - y) !== 1 || v.path.length > 8) { v.path = []; v.x = v.tx = x; v.y = v.ty = y; return; }   // a door, a ride, a big lag: just be there
+  if (v.lastStep) { const iv = (now - v.lastStep) / 1000; if (iv < 0.45) v.iv = v.iv ? v.iv * 0.7 + Math.max(0.07, iv) * 0.3 : Math.max(0.07, iv); }   // a pause isn't their pace
+  v.lastStep = now;
+  v.path.push([x, y]);
+}
+function walkPath(v, dt) {
+  /* walk the queued tiles at the pace they arrive (a walker, a runner, a rider), hurrying a little if we fall behind */
+  if (!v.path) { glide1(v, WALK_SPEED, dt); return; }
+  const pace = Math.max(2.5, Math.min(10, 1 / (v.iv || 1 / WALK_SPEED)));
+  let budget = pace * (1 + 0.3 * Math.max(0, v.path.length - 1)) * dt, moved = false;
+  while (v.path.length && budget > 0) {
+    const [px, py] = v.path[0], dx = px - v.x, dy = py - v.y, d = Math.hypot(dx, dy);
+    if (d > 0.001) v.facing = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : (dy < 0 ? "up" : "down");
+    if (d <= budget) { v.x = px; v.y = py; v.tx = px; v.ty = py; v.path.shift(); budget -= d; v.dist += d; }
+    else { v.x += dx / d * budget; v.y += dy / d * budget; v.dist += budget; budget = 0; }
+    moved = true;
+  }
+  v.still = moved ? 0 : (v.still || 0) + dt;
+  v.moving = v.still < 0.12;
+  v.fast = moved && pace > WALK_SPEED * 1.35;
+  if (!v.moving && v.sfacing) v.facing = v.sfacing;            // standing: face wherever they turned
+}
 function readyBubble(sx, sy, key, now) {
   /* a little thought bubble with the finished thing in it, bobbing over a machine or a hen */
   const b = Math.round(Math.sin(now / 280) * 2) * SCALE, x = sx + T / 2, y = sy - 10 * SCALE + b, r = 9 * SCALE;
@@ -1609,7 +1766,7 @@ function drawMob(kind, v, ox, oy, now, hp, tame, hurt) {
 function drawNpc(name, v, ox, oy, now) {
   const look = (catalog.npcs || {})[name] || ["boy", "white", "none"], f = v.f || [0, 1];
   const ci = Math.max(0, (catalog.player_colors || []).indexOf(look[1])), own = Art.LOOKS && Art.LOOKS[name];   // everyone has a look of their own
-  drawFarmer({ name, color: ci, sprite: own ? name : look[0], hat: own ? "none" : look[2], facing: f }, v.x, v.y, facingName(f), v.moving ? 1 + Math.floor(v.dist * 4) % 7 : 0, ox, oy, now, null);
+  drawFarmer({ name, color: ci, sprite: own ? name : look[0], hat: own ? "none" : look[2], facing: f }, v.x, v.y, facingName(f), v.moving ? 1 + Math.floor(v.dist * 4) % 8 : 0, ox, oy, now, null);
   const px_ = ox + v.x * T + T / 2, py_ = oy + v.y * T - 18 * SCALE;
   const mark = me && me.quest_marks && me.quest_marks[name];
   if (mark) drawQuestMark(px_, py_ - 4 * SCALE, mark, now);
@@ -1803,10 +1960,10 @@ function updateHudLive(now) {
   if (!me) return;
   const hpb = $("#hpbar"), loc = curLoc(), show = me.hp < me.max_hp || /^(mine|deep)/.test(loc);
   hpb.classList.toggle("hidden", !show);
-  if (show) { hpb.querySelector(".fill").style.width = (100 * me.hp / me.max_hp).toFixed(0) + "%"; hpb.querySelector(".label").textContent = "♥ " + me.hp + " / " + me.max_hp; hpb.classList.toggle("hurt", now - hurtAt < 150); }
+  if (show) { setStyle($("#hpbar .fill"), "width", (100 * me.hp / me.max_hp).toFixed(0) + "%"); setText($("#hpbar .label"), "♥ " + me.hp + " / " + me.max_hp); hpb.classList.toggle("hurt", now - hurtAt < 150); }
   const d = state && state.derby && state.derby[prefs.name];
   $("#derby").classList.toggle("hidden", !d);
-  if (d) $("#derby").textContent = "🎣 Derby  " + Math.max(0, d[0]) + "s  ·  " + d[1] + " fish";
+  if (d) setText($("#derby"), "🎣 Derby  " + Math.max(0, d[0]) + "s  ·  " + d[1] + " fish");
 }
 function wish() { if (wishStar) { send({ t: "wish", id: wishStar.id }); wishStar = null; $("#wish").classList.add("hidden"); } }
 // ------------------------------------------------------------------ generic windows: the server sends rows, we draw them
