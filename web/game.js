@@ -47,7 +47,8 @@ function groundOf(M) {
 let mode = "login";
 let menu = null, fishing = null;
 const viz = {};
-const my = { ready: false, x: 0, y: 0, tx: 0, ty: 0, stepping: false, dir: "down", dist: 0, lastSend: 0, lastTurn: 0, loc: "farm", queued: null, trail: [] };
+const my = { ready: false, x: 0, y: 0, tx: 0, ty: 0, vx: 0, vy: 0, stepping: false, dir: "down", sentDir: "down", dist: 0, lastSend: 0, lastTurn: 0, lastFace: 0,
+  loc: "farm", queued: null, trail: [], route: null, rested: null, stillFor: 0, portalWait: 0, fix: null };
 function curLoc() { return my.loc || "farm"; }
 function isArea(loc) { return !!(catalog && catalog.areas && catalog.areas[loc]); }
 function isOutdoor(loc) { return loc === "farm" || isArea(loc); }
@@ -93,6 +94,12 @@ function sfx(kind) {
   else if (kind === "pop") { note(330, 0, .07, "triangle", .06); }
   else if (kind === "ping") { note(660, 0, .15); note(880, .15, .15); note(660, .3, .25); }
   else if (kind === "fail") { note(300, 0, .15, "sawtooth", .04); note(220, .12, .25, "sawtooth", .04); }
+  else if (kind === "step") { const f = { grass: 140, snow: 120, wood: 210, stone: 260, path: 170, sand: 130, soil: 120, rug: 180 }[arguments[1]] || 160; note(f * (0.9 + Math.random() * 0.2), 0, .05, "sine", .018); }
+  else if (kind === "dig") { note(110, 0, .09, "sine", .06); note(90, .04, .1, "triangle", .04); }
+  else if (kind === "tink") { note(1400 + Math.random() * 200, 0, .06, "square", .025); note(900, .02, .08, "triangle", .03); }
+  else if (kind === "chop") { note(170, 0, .07, "triangle", .07); note(120, .03, .09, "sine", .05); }
+  else if (kind === "click") { note(880, 0, .03, "square", .02); }
+  else if (kind === "chirp") { note(2400, 0, .04, "sine", .02); note(2900, .05, .05, "sine", .018); note(2600, .12, .04, "sine", .015); }
 }
 function toggleMusic() {
   if (!audio) return;
@@ -183,8 +190,12 @@ function connect() {
   };
   ws.onerror = () => { if (reconnectTries === 0) toast("Could not reach the farm server.", "warn"); };
 }
-function send(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
+function send(m) {
+  if (FACE_SEND.has(m.t) && my.ready && !m.f) m.f = my.dir;           // we move freely, so the server learns which way we face as we act
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify(m));
+}
 if (location.hash === "#debug") window.cozyDebug = { handle: (m) => handle(m), state: () => state, me: () => me, viz: () => viz,
+  click: (x, y) => clickTile(x, y), parts: () => parts, birds: () => birds, npcViz: () => npcViz,
   bench: (n) => {   // render n frames back to back and report the average milliseconds spent in each part of the frame
     PROF = {}; const t0 = performance.now(); let t = t0;
     for (let i = 0; i < (n || 60); i++) { t += 16.7; profAt = performance.now(); profName = "setup"; renderFrame(t); profMark("flush"); ctx.getImageData(0, 0, 1, 1); profMark("end"); }
@@ -194,6 +205,7 @@ let PROF = null, profAt = 0, profName = "";
 function profMark(name) { if (!PROF) return; const t = performance.now(); PROF[profName] = (PROF[profName] || 0) + t - profAt; profAt = t; profName = name; }   // for testing: feed the client a message by hand
 function handle(m) {
   if (m.t === "welcome") {
+    lastInv = null;
     if (window.__build && m.build && m.build !== window.__build) { location.reload(); return; }   // the farm was updated: fetch the new game
     window.__build = m.build;
     farmName = m.farm; map = m.map; catalog = m.catalog; buildings = findBuildings(map);
@@ -209,6 +221,7 @@ function handle(m) {
     toast("Welcome to " + farmName + ", " + m.name + "! H for help, M for music.", "good");
   } else if (m.t === "state") {
     state = m; me = m.me; farmName = m.farm || farmName;
+    noticePickups();
     tiles = {};
     for (const k in m.tiles) tiles[k] = m.tiles[k];
     const now = performance.now();
@@ -217,7 +230,7 @@ function handle(m) {
       const v = viz[p.name] || (viz[p.name] = { x: p.x, y: p.y, tx: p.x, ty: p.y, dist: 0, facing: "down", moving: false, loc: p.loc, path: [] });
       if (v.loc !== (p.loc || "farm")) { v.loc = p.loc || "farm"; v.x = v.tx = p.x; v.y = v.ty = p.y; v.path = []; }
       queueStep(v, p.x, p.y, now);
-      v.sfacing = facingName(p.facing);
+      v.sfacing = facingName(p.facing); v.off = p.o || null;
     }
     for (const cw of m.cows || []) {
       const v = cowViz[cw.id] || (cowViz[cw.id] = { x: cw.x, y: cw.y, tx: cw.x, ty: cw.y, f: cw.f });
@@ -252,9 +265,9 @@ function handle(m) {
     if (m.sender !== prefs.name) toast(m.sender + ": " + m.text, "chat");
   } else if (m.t === "swing") {
     if (m.tool === "plant") return;   // planting is animated by the fx message now
-    const cur = swings[m.who];
-    if (m.who !== prefs.name || !cur) swings[m.who] = { tool: m.tool, start: performance.now(), x: m.x, y: m.y, item: m.item };
-    else { cur.x = m.x; cur.y = m.y; if (m.item) cur.item = m.item; }
+    const cur = swings[m.who], wp = state && state.players.find((q) => q.name === m.who), wloc = m.who === prefs.name ? curLoc() : (wp && wp.loc) || "farm";
+    if (m.who !== prefs.name || !cur) swings[m.who] = { tool: m.tool, start: performance.now(), x: m.x, y: m.y, item: m.item, who: m.who, loc: wloc };
+    else { cur.x = m.x; cur.y = m.y; cur.who = m.who; cur.loc = wloc; if (m.item) cur.item = m.item; if (performance.now() - cur.start > 140) toolImpact(cur); }
   } else if (m.t === "fx") {
     if (!my.ready || curLoc() !== "farm") return;   // only the farm renderer draws (and advances) these
     const from = carrierPos(m.who) || { x: m.x, y: m.y };
@@ -268,28 +281,32 @@ function handle(m) {
   else if (m.t === "ouch") { hurtAt = performance.now(); sfx("fail"); }
   else if (m.t === "minigame") startMinigame(m.game, m.seed);
   else if (m.t === "song") playSong(m.song);
-  else if (m.t === "fish_bite") startFishing(m);
+  else if (m.t === "fish_bite") { startFishing(m); if (my.ready) { const [dx, dy] = DELTA[my.dir], bx = my.tx + dx + 0.5, by = my.ty + dy + 0.5; spawn({ kind: "ring", x: bx, y: by, loc: curLoc(), layer: "ground", col: "rgba(230,248,255,.95)", life: 700, r: 0.6 }); burst(6, { x: bx, y: by, loc: curLoc(), col: ["#bfeaff", "#ffffff"], life: 500, size: 1.2, g: 10 }, { up: 2.4, speed: 1 }); } }
   else if (m.t === "error") { if (/another window/.test(m.text)) kicked = true; toast(m.text, "warn"); addLog(m.text, "warn"); }
 }
+function placeAt(p) {
+  const o = p.o || [0, 0];
+  my.loc = p.loc || "farm"; my.tx = p.x; my.ty = p.y; my.x = p.x + o[0]; my.y = p.y + o[1]; my.vx = my.vy = 0; my.fix = null;
+  my.dir = my.sentDir = facingName(p.facing); my.trail.length = 0; my.route = null; my.portalWait = 0; my.rested = o[0] + "," + o[1];
+}
 function reconcile(p, now) {
-  if (!my.ready) { my.ready = true; my.loc = p.loc || "farm"; my.x = my.tx = p.x; my.y = my.ty = p.y; my.dir = facingName(p.facing); cam.x = p.x + 0.5; cam.y = p.y + 0.5; cam.snap = true; return; }
+  if (!my.ready) { my.ready = true; placeAt(p); cam.x = p.x + 0.5; cam.y = p.y + 0.5; cam.snap = true; return; }
   if ((p.loc || "farm") !== my.loc) {
-    const from = my.loc; my.loc = p.loc || "farm"; my.x = my.tx = p.x; my.y = my.ty = p.y; my.stepping = false; my.dir = facingName(p.facing); cam.snap = true; held.clear(); my.trail.length = 0;
+    const from = my.loc; placeAt(p); cam.snap = true; fadeIn();
     if (isOutdoor(my.loc) && isOutdoor(from) && catalog.area_names) areaBanner = { text: catalog.area_names[my.loc].replace(/^the /, "The "), at: performance.now() };
     return;
   }
+  if (my.portalWait && now - my.portalWait > 1500) { my.portalWait = 0; fadeIn(); }   // the door didn't open (a locked mine floor...): carry on
   // the server may still be a few steps behind us (over the internet a reply can take a while): if where it has us is a tile
   // we walked through recently, it's just catching up, so keep walking. Only a position off our path (a step it refused, a
   // push, a teleport), or one that hasn't caught up a good while after our last step, puts us back where it says.
-  if (p.x === my.tx && p.y === my.ty) my.trail.length = 0;
-  else {
-    const behind = my.trail.includes(p.x + "," + p.y) && now - my.lastSend < 1500;
-    if (!behind) {
-      my.tx = p.x; my.ty = p.y; my.trail.length = 0;
-      if (Math.hypot(my.x - p.x, my.y - p.y) > 2) { my.x = p.x; my.y = p.y; my.stepping = false; } else my.stepping = true;
-    }
-  }
-  if (!held.size && !my.stepping) my.dir = facingName(p.facing);
+  if (p.x === my.tx && p.y === my.ty) { my.trail.length = 0; return; }
+  const behind = my.trail.includes(p.x + "," + p.y) && now - my.lastSend < 1500;
+  if (behind) return;
+  const o = p.o || [0, 0];
+  my.tx = p.x; my.ty = p.y; my.trail.length = 0; my.route = null; my.vx = my.vy = 0;
+  if (Math.hypot(my.x - p.x, my.y - p.y) > 2.5) { my.x = p.x + o[0]; my.y = p.y + o[1]; my.fix = null; }
+  else my.fix = { x: p.x + o[0], y: p.y + o[1] };                   // a small correction: glide there instead of jumping
 }
 function facingName(f) { if (f[1] > 0) return "down"; if (f[1] < 0) return "up"; return f[0] < 0 ? "left" : "right"; }
 function stamp(ts) { const d = new Date(ts * 1000); return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2); }
@@ -384,7 +401,8 @@ function updateHud() {
   setText($("#season"), st.season[0].toUpperCase() + st.season.slice(1) + ", day " + st.day + " (year " + st.year + ")");
   setText($("#clock"), skyLabel(hourNow()));
   setText($("#weather"), { sun: "Sunny", rain: "Raining", snow: "Snowing" }[st.weather]);
-  setText($("#coins"), st.coins + "g");
+  if (coinTarget !== null && st.coins !== coinTarget) { const c = $("#coins"); c.classList.remove("up", "down"); void c.offsetWidth; c.classList.add(st.coins > coinTarget ? "up" : "down"); }
+  coinTarget = st.coins;
   setText($("#online"), st.players.filter((p) => p.online).length + " online");
   if (me) {   // the little green farming xp bar under the tool bar
     const lo = 60 * me.level * me.level, hi = me.next_xp;
@@ -476,8 +494,13 @@ function describeArea(p) {
   return "Here: " + here + (ahead ? "     Ahead: " + ahead : "");
 }
 function heldItem() { if (!me || !me.inventory.length) return null; return me.inventory[Math.min(me.selected, me.inventory.length - 1)][0]; }
+function meNow() {
+  /* our player as the server sees it, but standing on our own tile and facing our own way */
+  const p = myPlayer();
+  return p && my.ready ? Object.assign({}, p, { x: my.tx, y: my.ty, facing: DELTA[my.dir], loc: my.loc }) : p;
+}
 function describeHere() {
-  const p = myPlayer(); if (!p || !catalog) return "";
+  const p = meNow(); if (!p || !catalog) return "";
   if (isArea(p.loc || "farm")) return describeArea(p);
   if ((p.loc || "farm") !== "farm") {
     const rows = catalog.interiors[p.loc], fx = p.x + p.facing[0], fy = p.y + p.facing[1], ch = (rows[fy] || "")[fx] || "#";
@@ -718,7 +741,7 @@ function renderMenu(fresh) {
     body.innerHTML = "<p><kbd>WASD</kbd> or arrows to walk. You act on the tile you stand on; the pond, shop, bin, board, well, mailbox and trees are used by facing them (they glow).</p>" +
       "<p><kbd>E</kbd> or <kbd>Space</kbd> does the natural thing: till grass, plant the seed in hand, water, harvest, pick forage, refill the can at the pond or well, open the shop / bin / board.</p>" +
       "<p><kbd>F</kbd> fishes when facing the pond: keep the fish inside your net with <kbd>&larr;</kbd> <kbd>&rarr;</kbd> or the mouse.</p>" +
-      "<p><kbd>X</kbd> clears the tile you stand on, or picks up the storage chest you face (carry it and press <kbd>E</kbd> to set it down). <kbd>1</kbd>-<kbd>9</kbd> pick what you hold, <kbd>I</kbd> opens the bag, <kbd>J</kbd> the journal, <kbd>L</kbd> your quest log, <kbd>K</kbd> the Valley Book, <kbd>N</kbd> the valley map (Father TongTong gives you one), <kbd>T</kbd> chats, <kbd>M</kbd> music (and the songs Rowan teaches you), <kbd>+</kbd>/<kbd>-</kbd> zoom, <kbd>G</kbd> smooth or crisp graphics. Hold <kbd>Shift</kbd> while you walk to run.</p>" +
+      "<p><kbd>X</kbd> clears the tile you stand on, or picks up the storage chest you face (carry it and press <kbd>E</kbd> to set it down). <kbd>1</kbd>-<kbd>9</kbd> pick what you hold, <kbd>I</kbd> opens the bag, <kbd>J</kbd> the journal, <kbd>L</kbd> your quest log, <kbd>K</kbd> the Valley Book, <kbd>N</kbd> the valley map (Father TongTong gives you one), <kbd>T</kbd> chats, <kbd>M</kbd> music (and the songs Rowan teaches you), <kbd>+</kbd>/<kbd>-</kbd> zoom, <kbd>G</kbd> smooth or crisp graphics. Hold <kbd>Shift</kbd> while you walk to run. You can walk in any direction (two keys at once for diagonals). Click anywhere to walk there; click something (a crop, a villager, a door, a field while you hold the hoe) to walk over and use it.</p>" +
       "<p>Explore the valley: walk off the farm's paths west to <b>Hollow Town</b> (shops, saloon, museum, folks to talk to), north to <b>Summit Ridge</b> and its <b>mine</b> (break ore and gems with the pickaxe, ladders go deeper), south to the <b>Whisperwood</b>. From town go south to <b>Driftwood Beach</b>, where a boat at the pier sails to <b>Palm Isle</b>; the stagecoach in town rides to <b>Dusty Gulch</b>. Fish in rivers, lakes and the sea, and forage what each place grows.</p>" +
       "<p><b>Folks and festivals.</b> Villagers walk to work, the shops and home on the clock. Face one and press <kbd>E</kbd> to chat; press it again holding something to give it as a gift (everyone has favourites). On festival days the town square fills up: talk to Mayor Hazel for the line dance, the rodeo, the livestock fair, Fallfest, the fishing derby or the winter feast. The <b>Town Hall</b> takes donations for projects that grow the town and bring new neighbours.</p>" +
       "<p><b>Quests and levels.</b> A <b>!</b> over a villager means they have a favor to ask or a story to share; a <b>?</b> means you have what they asked for. <kbd>L</kbd> shows your quest log and what your next level unlocks. Levels open new seeds, saplings, recipes and deeper mine floors, and fruit trees grow only in the marked tree spots in the orchard meadow south of the fields - more spots open as you level.</p>" +
@@ -813,7 +836,7 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   if (e.key === "Escape" && mapOpen) { closeMap(); return; }
-  if (DIRS[e.key]) { const dir = DIRS[e.key]; held.add(dir); lastDir = dir; if (!e.repeat && !tryStep(dir, performance.now())) my.queued = dir; e.preventDefault(); }
+  if (DIRS[e.key]) { const dir = DIRS[e.key]; held.add(dir); lastDir = dir; e.preventDefault(); }
   else if (e.key === "e" || e.key === "E" || e.key === " " || e.key === "Enter") {
     const tool = heldItem(), mp = myPlayer();
     if (tool && TOOLS.has(tool) && tool !== "fishing_rod") swings[prefs.name] = { tool, start: performance.now() };
@@ -851,61 +874,207 @@ function submitChat() {
   if (text.toLowerCase().startsWith("/ping")) { const parts = text.split(/\s+/); send({ t: "ping", text: parts.slice(1).join(" ") || "hi" }); return; }
   send({ t: "chat", text });
 }
+let clickMark = null, hoverTile = null, hoverAt = 0;
+canvas.addEventListener("mousemove", (e) => {
+  if (!my.ready || mode !== "play") { hoverTile = null; return; }
+  const r = canvas.getBoundingClientRect(), tx = Math.floor(((e.clientX - r.left) * rdpr - _ox) / T), ty = Math.floor(((e.clientY - r.top) * rdpr - _oy) / T);
+  if (!hoverTile || hoverTile.x !== tx || hoverTile.y !== ty) { hoverTile = { x: tx, y: ty, use: usable(tx, ty) }; canvas.style.cursor = hoverTile.use ? "pointer" : "default"; }
+  hoverAt = performance.now();
+});
+canvas.addEventListener("mouseleave", () => { hoverTile = null; canvas.style.cursor = "default"; });
+function drawHover(ox, oy, now) {
+  if (!hoverTile || now - hoverAt > 2500) return;
+  const a = Math.min(1, (2500 - (now - hoverAt)) / 500) * (hoverTile.use ? 0.55 : 0.28), x = ox + hoverTile.x * T, y = oy + hoverTile.y * T, c = 3 * SCALE;
+  ctx.strokeStyle = "rgba(255,250,220," + a.toFixed(3) + ")"; ctx.lineWidth = SCALE;
+  for (const [ax, ay, dx, dy] of [[x, y, 1, 1], [x + T, y, -1, 1], [x, y + T, 1, -1], [x + T, y + T, -1, -1]]) { ctx.beginPath(); ctx.moveTo(ax + dx * c * 2, ay); ctx.lineTo(ax, ay); ctx.lineTo(ax, ay + dy * c * 2); ctx.stroke(); }
+}
+function usable(x, y) {
+  /* is there something on this tile to use (rather than a place to walk to)? */
+  const loc = curLoc(), d = (isArea(loc) ? areaTiles(loc) : tiles)[x + "," + y] || {};
+  if (!walkable(x, y)) return true;
+  if (d.c || d.g || d.t || d.m || d.o) return true;
+  const sel = heldItem(), it = sel && catalog.items[sel], ch0 = (curMap()[y] || "")[x];
+  if (loc === "farm" && ((sel === "hoe" && ch0 === "d" && !d.s) || (sel === "watering_can" && d.s && !d.w) || (it && it.kind === "seed" && d.s && !d.c))) return true;   // click a field with a tool: go and use it
+  if ((state.npcs || []).some((n) => n.loc === loc && n.x === x && n.y === y)) return true;
+  const ch = (curMap()[y] || "")[x];
+  return !!ch && "~!wmIEFJLOgVQUDBchbljMXy$S".includes(ch);
+}
 canvas.addEventListener("click", (e) => {
   if (mode === "chat") closeChat();
   canvas.focus();
   if (mode !== "play" || !my.ready) return;
   const r = canvas.getBoundingClientRect(), mx = (e.clientX - r.left) * rdpr, my_ = (e.clientY - r.top) * rdpr;
-  const tx = Math.floor((mx - _ox) / T), ty = Math.floor((my_ - _oy) / T);
-  const dx = tx - my.tx, dy = ty - my.ty;
-  if (dx === 0 && dy === 0) { send({ t: "interact" }); return; }
-  const fdx = Math.abs(dx) >= Math.abs(dy) ? Math.sign(dx) : 0, fdy = Math.abs(dx) >= Math.abs(dy) ? 0 : Math.sign(dy);
-  const dir = fdx < 0 ? "left" : fdx > 0 ? "right" : fdy < 0 ? "up" : "down";
-  my.dir = dir; send({ t: "face", dx: fdx, dy: fdy });
-  if (Math.max(Math.abs(dx), Math.abs(dy)) <= 1) {
-    const tool = heldItem();
-    if (tool && TOOLS.has(tool) && tool !== "fishing_rod") swings[prefs.name] = { tool, start: performance.now() };
-    setTimeout(() => send({ t: "interact" }), 40);
-  }
+  clickTile(Math.floor((mx - _ox) / T), Math.floor((my_ - _oy) / T));
 });
-
-// movement with client-side prediction: we walk immediately, the server confirms
-function updateSelf(dt, now) {
-  if (!my.ready) return;
-  if (state && state.wedding) { my.stepping = false; return; }
-  const mp = myPlayer(), run = running && held.size > 0 && !(mp && mp.riding);
-  const boost = (mp && mp.riding ? 1.8 : 1) * (me && me.buffs && me.buffs.speed > 0 ? 1.3 : 1) * (run ? RUN_MULT : 1);
-  let budget = WALK_SPEED * boost * dt;
-  if (run && my.stepping && now - lastDust > 130 && isOutdoor(curLoc())) { lastDust = now; runDust.push({ x: my.x + 0.5, y: my.y + 0.92, t0: now, loc: curLoc() }); }
-  for (let i = 0; i < 3; i++) {
-    if (!my.stepping) {
-      if (mode !== "play") break;
-      if (held.size) { my.queued = null; tryStep((lastDir && held.has(lastDir)) ? lastDir : Array.from(held).pop(), now); }
-      else if (my.queued) { const d = my.queued; my.queued = null; tryStep(d, now); }
-      if (!my.stepping || budget <= 0) break;
-    }
-    const dx = my.tx - my.x, dy = my.ty - my.y, dist = Math.hypot(dx, dy);
-    if (dist <= budget) { my.x = my.tx; my.y = my.ty; my.stepping = false; my.dist += dist; budget -= dist; }
-    else { my.x += dx / dist * budget; my.y += dy / dist * budget; my.dist += budget; budget = 0; break; }
+function clickTile(tx, ty) {
+  const dx = tx - my.tx, dy = ty - my.ty;
+  clickMark = { x: tx, y: ty, t0: performance.now() };
+  if (dx === 0 && dy === 0) { send({ t: "interact" }); return; }
+  const something = usable(tx, ty);
+  if (Math.abs(dx) + Math.abs(dy) === 1 && something) {      // right beside us: turn and use it
+    my.dir = dx < 0 ? "left" : dx > 0 ? "right" : dy < 0 ? "up" : "down";
+    my.sentDir = my.dir; send({ t: "face", dx, dy }); my.route = null;
+    setTimeout(useAhead, 40);
+    return;
   }
+  if (!routeTo(tx, ty, something)) { clickMark.bad = true; sfx("fail"); }
 }
-function tryStep(dir, now = performance.now()) {
-  // One tile of predicted movement in `dir`; returns true when a step (or a door/turn request) was issued.
-  if (!my.ready || my.stepping || mode !== "play" || (state && state.wedding)) return false;
-  const [ddx, ddy] = DELTA[dir];
-  my.dir = dir;
-  const nx = my.tx + ddx, ny = my.ty + ddy;
-  const rows = curMap(), ch = (rows[ny] || "")[nx];
-  const teleport = portals.has(curLoc() + "," + nx + "," + ny);
-  if (teleport) { if (now - my.lastTurn > 400) { my.lastTurn = now; my.lastSend = now; send({ t: "move", dx: ddx, dy: ddy }); } return true; }
-  if (walkable(nx, ny)) {
-    my.trail.push(my.tx + "," + my.ty); if (my.trail.length > 16) my.trail.shift();
-    my.tx = nx; my.ty = ny; my.stepping = true; my.lastSend = now; send({ t: "move", dx: ddx, dy: ddy }); return true;
-  }
-  if (now - my.lastTurn > 250) { my.lastTurn = now; my.lastSend = now; send({ t: "move", dx: ddx, dy: ddy }); }
+
+// ------------------------------------------------------------------ moving freely (like Stardew or Animal Crossing)
+// The farmer glides anywhere, in eight directions, easing in and out; the feet slide along walls and are nudged round corners and
+// into doorways. The server still thinks in tiles: whenever the tile under our feet changes we tell it (with the way we face),
+// and when we come to rest inside a tile we tell it where, so everyone else sees us standing just there.
+const HIT = { l: 0.2, r: 0.8, t: 0.55, b: 0.95 };          // the feet's box, inside the tile the farmer is drawn on
+const ACCEL = 24, DECEL = 30;                              // how quickly we reach full speed and stop (per second, eased)
+const FACE_SEND = new Set(["interact", "fish_start", "clear", "eat"]);
+function footTile(x, y) { return [Math.floor(x + 0.5), Math.floor(y + 0.75)]; }
+function boxSpan(x, y) { return [Math.floor(x + HIT.l), Math.floor(x + HIT.r - 1e-6), Math.floor(y + HIT.t), Math.floor(y + HIT.b - 1e-6)]; }
+function overlapped(x, y) { const [x0, x1, y0, y1] = boxSpan(x, y), out = new Set(); for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) out.add(tx + "," + ty); return out; }
+function boxFree(x, y, inside) {
+  /* can the feet stand here? (tiles we're already overlapping never stop us, so a villager stepping on our toes can't trap us) */
+  const [x0, x1, y0, y1] = boxSpan(x, y);
+  for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) if (!inside.has(tx + "," + ty) && !walkable(tx, ty)) return false;
   return true;
 }
-
+function slideAxis(axis, amount, inside, assist) {
+  /* move along one axis as far as the feet can go; if a wall stops us but a gap is just beside us, ease sideways into it */
+  if (!amount) return 0;
+  const steps = Math.max(1, Math.ceil(Math.abs(amount) / 0.2)), part = amount / steps;
+  let moved = 0;
+  for (let i = 0; i < steps; i++) {
+    const nx = axis === "x" ? my.x + part : my.x, ny = axis === "y" ? my.y + part : my.y;
+    if (boxFree(nx, ny, inside)) { my.x = nx; my.y = ny; moved += part; continue; }
+    // flush against the wall
+    let lo = 0, hi = 1;
+    for (let k = 0; k < 6; k++) { const mid = (lo + hi) / 2; if (boxFree(axis === "x" ? my.x + part * mid : my.x, axis === "y" ? my.y + part * mid : my.y, inside)) lo = mid; else hi = mid; }
+    if (axis === "x") my.x += part * lo; else my.y += part * lo;
+    moved += part * lo;
+    if (assist) {
+      // corner help: the lane beside us (to the nearest tile line) is open, so slide toward it
+      const other = axis === "x" ? "y" : "x", cur = other === "y" ? my.y : my.x, lane = Math.round(cur), gap = lane - cur;
+      const tryX = axis === "x" ? my.x + Math.sign(part) * 0.05 : lane, tryY = axis === "y" ? my.y + Math.sign(part) * 0.05 : lane;
+      if (Math.abs(gap) > 0.01 && Math.abs(gap) < 0.48 && boxFree(tryX, tryY, inside)) {
+        const step = Math.sign(gap) * Math.min(Math.abs(gap), Math.abs(amount) * 0.9);
+        if (boxFree(other === "x" ? my.x + step : my.x, other === "y" ? my.y + step : my.y, inside)) { if (other === "x") my.x += step; else my.y += step; }
+      }
+    }
+    return moved;
+  }
+  return moved;
+}
+function sendMove(dx, dy, now) {
+  my.trail.push(my.tx + "," + my.ty); if (my.trail.length > 24) my.trail.shift();
+  my.tx += dx; my.ty += dy; my.lastSend = now; my.sentDir = my.dir; my.rested = null;
+  send({ t: "move", dx, dy, f: my.dir });
+}
+function updateSelf(dt, now) {
+  if (!my.ready) return;
+  if (state && state.wedding) { my.vx = my.vy = 0; my.stepping = false; return; }
+  const loc = curLoc();
+  if (my.fix) {
+    const dx = my.fix.x - my.x, dy = my.fix.y - my.y, d = Math.hypot(dx, dy), st = 9 * dt;
+    if (d <= st) { my.x = my.fix.x; my.y = my.fix.y; my.fix = null; } else { my.x += dx / d * st; my.y += dy / d * st; my.dist += st; my.stepping = true; return; }
+  }
+  // where we're asked to go: the keys, or a path from a click
+  let ix = 0, iy = 0;
+  if (mode === "play" && !(my.portalWait && now - my.portalWait < 1500)) {
+    if (held.has("left")) ix -= 1; if (held.has("right")) ix += 1; if (held.has("up")) iy -= 1; if (held.has("down")) iy += 1;
+    if (ix || iy) my.route = null;
+    else if (my.route) [ix, iy] = followRoute(now);
+  }
+  const len = Math.hypot(ix, iy); if (len) { ix /= len; iy /= len; }
+  const mp = myPlayer(), riding = !!(mp && mp.riding), run = running && len > 0 && !riding;
+  const speed = WALK_SPEED * (riding ? 1.8 : 1) * (me && me.buffs && me.buffs.speed > 0 ? 1.3 : 1) * (run ? RUN_MULT : 1) * (my.route ? (my.route.run ? RUN_MULT : 1) : 1);
+  const k = 1 - Math.exp(-(len ? ACCEL : DECEL) * dt);
+  my.vx += (ix * speed - my.vx) * k; my.vy += (iy * speed - my.vy) * k;
+  if (!len && Math.hypot(my.vx, my.vy) < 0.08) my.vx = my.vy = 0;
+  // which way we face: the way we're pushing (sideways wins on a diagonal, like Stardew)
+  if (len) my.dir = Math.abs(ix) > 0.35 ? (ix < 0 ? "left" : "right") : (iy < 0 ? "up" : "down");
+  // move, sliding along whatever is in the way
+  const inside = new Set([...overlapped(my.x, my.y)].filter((key) => { const [a, b] = key.split(",").map(Number); return !walkable(a, b); }));
+  const x0 = my.x, y0 = my.y;
+  slideAxis("x", my.vx * dt, inside, len > 0 && Math.abs(iy) < 0.5);
+  slideAxis("y", my.vy * dt, inside, len > 0 && Math.abs(ix) < 0.5);
+  const moved = Math.hypot(my.x - x0, my.y - y0);
+  if (len && moved < Math.hypot(my.vx, my.vy) * dt * 0.25) { my.vx *= 0.5; my.vy *= 0.5; }   // pressing into a wall: don't keep a full head of speed
+  my.dist += moved;
+  my.stepping = moved / Math.max(dt, 1e-3) > 0.6;
+  if (run && my.stepping && now - lastDust > 130 && isOutdoor(loc)) { lastDust = now; runDust.push({ x: my.x + 0.5, y: my.y + 0.92, t0: now, loc }); }
+  if (my.stepping) footsteps(now, loc);
+  // the tile under our feet changed: tell the server (one step at a time, diagonals included)
+  const [tx, ty] = footTile(my.x, my.y);
+  let guard = 0;
+  while ((tx !== my.tx || ty !== my.ty) && guard++ < 4) { sendMove(Math.sign(tx - my.tx), Math.sign(ty - my.ty), now); brushPast(my.tx, my.ty, now); }
+  if (len && !my.stepping) bumpInto(now);
+  if (portals.has(loc + "," + my.tx + "," + my.ty) && !my.portalWait) { my.portalWait = now; startFade(); my.vx = my.vy = 0; my.route = null; }
+  // leaning on a door, a ladder or a cave exit: ask to go through (the server decides)
+  if (len && !my.stepping && now - my.lastTurn > 400) {
+    const [fdx, fdy] = DELTA[my.dir], fx = my.tx + fdx, fy = my.ty + fdy, ch = (curMap()[fy] || "")[fx];
+    if (portals.has(loc + "," + fx + "," + fy) || ch === "D" || ch === "U") { my.lastTurn = now; my.lastSend = now; startFade(); send({ t: "move", dx: fdx, dy: fdy, f: my.dir }); }
+  }
+  // turned without stepping, or stopped inside a tile: keep the server in the picture
+  if (my.dir !== my.sentDir && now - my.lastFace > 120) { my.lastFace = now; my.sentDir = my.dir; const [fdx, fdy] = DELTA[my.dir]; send({ t: "face", dx: fdx, dy: fdy }); }
+  if (!my.stepping && !len) {
+    my.stillFor = (my.stillFor || 0) + dt;
+    const ox = +(my.x - my.tx).toFixed(2), oy = +(my.y - my.ty).toFixed(2), key = ox + "," + oy;
+    if (my.stillFor > 0.15 && my.rested !== key) { my.rested = key; send({ t: "rest", ox: String(ox), oy: String(oy) }); }
+  } else my.stillFor = 0;
+}
+function tryStep(dir, now = performance.now()) {
+  /* a nudge in one direction (used by tests and the old click code): walk to the next tile's centre */
+  if (!my.ready || mode !== "play") return false;
+  const [dx, dy] = DELTA[dir]; my.dir = dir;
+  if (!walkable(my.tx + dx, my.ty + dy)) return false;
+  my.route = { pts: [[my.tx + dx, my.ty + dy]], i: 0 };
+  return true;
+}
+function followRoute(now) {
+  /* steer through the tile centres of a click's path; arrive, face the target, and use it */
+  const r = my.route, pt = r.pts[r.i];
+  if (!pt) { const done = r; my.route = null; arrive(done); return [0, 0]; }
+  const dx = pt[0] - my.x, dy = pt[1] - my.y, d = Math.hypot(dx, dy);
+  if (d < 0.12) { r.i++; if (r.i >= r.pts.length) { my.x = pt[0]; my.y = pt[1]; my.vx *= 0.3; my.vy *= 0.3; } return followRoute(now); }
+  if (now - (r.t0 || (r.t0 = now)) > 15000) { my.route = null; return [0, 0]; }
+  return [dx / d, dy / d];
+}
+function arrive(r) {
+  if (!r || !r.target) return;
+  const [ax, ay] = r.target, dx = ax - my.tx, dy = ay - my.ty;
+  if (Math.abs(dx) + Math.abs(dy) !== 1) return;
+  my.dir = dx < 0 ? "left" : dx > 0 ? "right" : dy < 0 ? "up" : "down";
+  my.sentDir = my.dir;
+  if (portals.has(curLoc() + "," + ax + "," + ay)) { my.lastTurn = performance.now(); startFade(); send({ t: "move", dx, dy, f: my.dir }); return; }   // a door: go in
+  send({ t: "face", dx, dy });
+  if (r.use) useAhead();
+}
+function useAhead() {
+  const tool = heldItem();
+  if (tool && TOOLS.has(tool) && tool !== "fishing_rod") swings[prefs.name] = { tool, start: performance.now() };
+  send({ t: "interact" });
+}
+function routeTo(gx, gy, use) {
+  /* breadth-first search over the tiles we can walk, to the clicked tile (or next to it, if it's something to use) */
+  const W_ = curMap()[0].length, H_ = curMap().length, start = my.tx + "," + my.ty;
+  const goals = new Set(), standable = walkable(gx, gy);
+  if (standable && !use) goals.add(gx + "," + gy);
+  else for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) if (walkable(gx + dx, gy + dy) || (gx + dx === my.tx && gy + dy === my.ty)) goals.add((gx + dx) + "," + (gy + dy));
+  if (!goals.size) return false;
+  const prev = new Map([[start, null]]), q = [[my.tx, my.ty]];
+  let found = goals.has(start) ? start : null;
+  for (let qi = 0; qi < q.length && !found && qi < 6000; qi++) {
+    const [x, y] = q[qi];
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, ny = y + dy, key = nx + "," + ny;
+      if (nx < 0 || ny < 0 || nx >= W_ || ny >= H_ || prev.has(key) || !walkable(nx, ny) || portals.has(curLoc() + "," + key)) continue;
+      prev.set(key, x + "," + y); q.push([nx, ny]);
+      if (goals.has(key)) { found = key; break; }
+    }
+  }
+  if (!found) return false;
+  const pts = []; for (let key = found; key && key !== start; key = prev.get(key)) pts.unshift(key.split(",").map(Number));
+  my.route = { pts, i: 0, target: [gx, gy], use, run: running };
+  return true;
+}
 // ------------------------------------------------------------------ rendering
 let lastFrame = performance.now(), waterFrame = 0, waterAcc = 0, smokeAcc = 0;
 function isType(x, y, ch) { return y >= 0 && y < RG.length && x >= 0 && x < RG[0].length && RG[y][x] === ch; }
@@ -1017,13 +1186,15 @@ function renderFrame(now) {
   waterAcc += dt; if (waterAcc > 0.45) { waterAcc = 0; waterFrame = (waterFrame + 1) % 3; }
   const mapW = M[0].length, mapH = M.length;
   if (my.ready) {
-    const focus = (window.cozy && window.cozy.look && isFinite(window.cozy.look.x) && isFinite(window.cozy.look.y)) ? window.cozy.look : farm && state.wedding ? { x: state.wedding.altar[0][0] + 1, y: state.wedding.altar[0][1] + 2 } : { x: my.x + 0.5, y: my.y + 0.5 };
+    leanCam(dt);
+    const focus = (window.cozy && window.cozy.look && isFinite(window.cozy.look.x) && isFinite(window.cozy.look.y)) ? window.cozy.look : farm && state.wedding ? { x: state.wedding.altar[0][0] + 1, y: state.wedding.altar[0][1] + 2 } : { x: my.x + 0.5 + camLead.x, y: my.y + 0.5 + camLead.y };
     const [tx, ty] = camTarget(mapW, mapH, cw, ch, focus.x, focus.y);
     if (cam.snap || Math.abs(tx - cam.x) > 8 || Math.abs(ty - cam.y) > 8) { cam.x = tx; cam.y = ty; cam.snap = false; }
     const k = 1 - Math.exp(-7 * dt);
     cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k;
   }
-  const ox = Math.round(cw / 2 - cam.x * T), oy = Math.round(ch / 2 - cam.y * T);
+  const [shx, shy] = shakeOffset(now);
+  const ox = Math.round(cw / 2 - cam.x * T) + shx, oy = Math.round(ch / 2 - cam.y * T) + shy;
   _ox = ox; _oy = oy;
   const x0 = Math.max(0, Math.floor(-ox / T) - 1), y0 = Math.max(0, Math.floor(-oy / T) - 1);
   const x1 = Math.min(mapW - 1, Math.ceil((cw - ox) / T) + 1), y1 = Math.min(mapH - 1, Math.ceil((ch - oy) / T) + 2);
@@ -1043,7 +1214,7 @@ function renderFrame(now) {
     const h = hash(x * 5 + 2, y * 3 + 1), n = Art.noise2(x, y);
     if ((h % 100) / 100 > 0.10 + n * 0.12) continue;
     const kind = Art.DECOR_KINDS[(h >> 8) % Art.DECOR_KINDS.length];
-    const d = Art.decorSprite(season, kind, (h >> 4) % 8); if (d) ctx.drawImage(d, ox + x * T, oy + y * T, T, T);
+    const d = Art.decorSprite(season, kind, (h >> 4) % 8); if (d) swayDraw(d, ox + x * T, oy + y * T, T, T, rustleAmt(x, y, now));
   }
   const faces = [];
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
@@ -1106,7 +1277,7 @@ function renderFrame(now) {
       ctx.drawImage(ch_ === "#" ? Art.fenceSprite(mask) : Art.gateSprite(!!(mask & 5)), sx, sy, T, T);
     }
     else if (ch_ === "f" && town && rvs < 1) ctx.drawImage(Art.wiltedPlanter(), sx, sy, T, T);
-    else if ("o$!fBchmlbwspg".includes(ch_)) { if (ch_ === "o" || ch_ === "l" || ch_ === "!" || ch_ === "g") ents.push({ y: y + 0.4, draw: () => ctx.drawImage(Art.propSprite(ch_), sx, sy, T, T) }); else ctx.drawImage(Art.propSprite(ch_), sx, sy, T, T); }
+    else if ("o$!fBchmlbwspg".includes(ch_)) { if (ch_ === "o" || ch_ === "l" || ch_ === "!" || ch_ === "g") ents.push({ y: y + 0.4, draw: () => ctx.drawImage(Art.propSprite(ch_), sx, sy, T, T) }); else if (ch_ === "f") swayDraw(Art.propSprite("f"), sx, sy, T, T, rustleAmt(x, y, now)); else ctx.drawImage(Art.propSprite(ch_), sx, sy, T, T); }
     else if (ch_ === "J" && town && rvs < 1) { const spr = Art.stallShut(); ents.push({ y: y + 0.4, draw: () => ctx.drawImage(spr, sx, sy, T, T) }); }
     else if ("ELIJOUD".includes(ch_)) { const spr = Art.areaProp(ch_, h); ents.push({ y: y + 0.4, draw: () => ctx.drawImage(spr, sx, sy, T, T) }); }
     else if (ch_ === "X") ents.push({ y: y + 0.5, draw: () => ctx.drawImage(Art.minecartSprite(), sx, sy, T, T) });
@@ -1117,13 +1288,13 @@ function renderFrame(now) {
       ents.push({ y: y + 0.1, draw: () => steam(sx, sy, now, h) });
     }
     else if (town && rvs < 1 && (ch_ === "." || ch_ === "=") && hash(x * 3 + 1, y * 7 + 2) % 11 === 0 && !(state.npcs || []).some((n) => n.loc === loc && n.x === x && n.y === y)) ctx.drawImage(Art.weedSprite(h % 6), sx, sy, T, T);
-    else if (ch_ === "u") ents.push({ y: y + 0.4, draw: () => { ctx.fillStyle = "rgba(0,0,0,.15)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, sy + T - 3 * SCALE, 12 * SCALE, 4 * SCALE, 0, 0, 6.3); ctx.fill(); ctx.drawImage(Art.propSprite("u"), sx, sy - 4 * SCALE, T, T); } });
+    else if (ch_ === "u") ents.push({ y: y + 0.4, draw: () => { ctx.fillStyle = "rgba(0,0,0,.15)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, sy + T - 3 * SCALE, 12 * SCALE, 4 * SCALE, 0, 0, 6.3); ctx.fill(); swayDraw(Art.propSprite("u"), sx, sy - 4 * SCALE, T, T, rustleAmt(x, y, now) * 0.6); } });
     else if (ch_ === "Y") ents.push({ y: y + 0.9, draw: () => { ctx.fillStyle = "rgba(0,0,0,.22)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, sy + T - 2 * SCALE, 11 * SCALE, 4 * SCALE, 0, 0, 6.3); ctx.fill(); ctx.drawImage(Art.priestSprite(Math.floor(now / 700) % 2), sx, sy - 16 * SCALE, T, 48 * SCALE); } });
     else if (ch_ === "~" && h % 9 === 0 && cell(x, y - 1) === "~" && cell(x, y + 1) === "~" && cell(x - 1, y) === "~" && cell(x + 1, y) === "~" && isType(x, y - 1, "~") && isType(x, y + 1, "~") && isType(x - 1, y, "~") && isType(x + 1, y, "~") && !(loc === "beach" || loc === "island")) ctx.drawImage(Art.lilyPad(h % 4), sx, sy, T, T);
     else if (ch_ === "T") {
       const dEdge = Math.min(x - 1, mapW - 2 - x, y - 1, mapH - 2 - y);
       if (dEdge === 1 && h % 5 < 2) ctx.drawImage(Art.bushSprite(treeKind(season, x, y), h % 4), sx, sy, T, T);
-      else ents.push({ y: y + 0.5, tree: true, sx, sy, kind: treeKind(season, x, y), variant: h % 16 });
+      else ents.push({ y: y + 0.5, tree: true, sx, sy, tx: x, ty: y, kind: treeKind(season, x, y), variant: h % 16 });
     }
     else if (ch_ === "P") ents.push({ y: y + 0.5, big: Art.pineSprite(season, h % 8), sx, sy });
     else if (ch_ === "A") ents.push({ y: y + 0.5, palm: Art.palmSprite(h % 6), sx, sy });
@@ -1133,12 +1304,12 @@ function renderFrame(now) {
     else if (ch_ === "V" && cell(x - 1, y) !== "V") ctx.drawImage(Art.boatSprite(), sx, sy + Math.round(Math.sin(now / 600) * SCALE), 2 * T, T);
     if (d) {
       const flying = inFlight(x, y, now);   // something is still falling onto this tile: show it when it lands
-      if (d.c && !flying) ctx.drawImage(Art.cropSprite(d.c[0], d.c[1], d.c[2]), sx, sy, T, T);
+      if (d.c && !flying) { ctx.drawImage(Art.cropSprite(d.c[0], d.c[1], d.c[2]), sx, sy, T, T); if (d.c[2] && Math.random() < dt * 0.5) spawn({ kind: "star", x: x + 0.2 + Math.random() * 0.6, y: y + 0.5, z: 0.3 + Math.random() * 0.3, vz: 0.4, g: 0, loc, col: "#fff6c0", life: 650, size: 1.2 }); }
       if (d.g) ctx.drawImage(Art.forageSprite(d.g), sx, sy, T, T);
       if (d.k && !flying) ctx.drawImage(Art.propSprite("k"), sx, sy, T, T);
       const rareTree = d.t && catalog.trees[d.t[0]] && catalog.trees[d.t[0]].rare && Art.rareTreeSprite ? d.t[0] : null;
       if (rareTree) { if (d.t[1] < 2) { if (!flying) ctx.drawImage(Art.rareTreeSprite(rareTree, d.t[1], season), sx, sy, T, T); } else ents.push({ y: y + 0.5, rareTree, sx, sy, season }); }
-      else if (d.t) { if (d.t[1] < 2) { if (!flying) ctx.drawImage(Art.youngTree(d.t[1], season), sx, sy, T, T); } else ents.push({ y: y + 0.5, tree: true, sx, sy, kind: season === "winter" ? "snow" : "green", variant: h % 16, fruitColor: ITEM_HEX[d.t[0]] || "#e8394a", fruit: d.t[2] }); }
+      else if (d.t) { if (d.t[1] < 2) { if (!flying) ctx.drawImage(Art.youngTree(d.t[1], season), sx, sy, T, T); } else ents.push({ y: y + 0.5, tree: true, sx, sy, tx: x, ty: y, kind: season === "winter" ? "snow" : "green", variant: h % 16, fruitColor: ITEM_HEX[d.t[0]] || "#e8394a", fruit: d.t[2] }); }
     }
     if (!farm) {
       const ad = ATL[x + "," + y];
@@ -1164,7 +1335,10 @@ function renderFrame(now) {
   if (farm) for (const c of state.chickens || []) {
     const v = chickViz[c.id]; if (!v || !inView(v.x, v.y)) continue;
     const fr = v.moving ? 1 : (Math.floor(now / 700 + c.id) % 6 === 0 ? 2 : 0);
-    ents.push({ y: v.y + 0.8, draw: () => { drawSide(Art.chickenSprite(c.c, fr), v.x, v.y, c.f, ox, oy, T, 1); if (c.egg) readyBubble(ox + v.x * T, oy + v.y * T - 8 * SCALE, "egg", now); } });
+    const spook = my.ready && my.stepping && Math.hypot(my.x - v.x, my.y - v.y) < 1.4;     // hurry past a hen and she flaps
+    if (spook && !v.flapT) v.flapT = now; else if (!spook && v.flapT && now - v.flapT > 500) v.flapT = 0;
+    const hop = v.flapT && now - v.flapT < 500 ? -Math.abs(Math.sin((now - v.flapT) / 500 * Math.PI * 2)) * 0.22 : 0;
+    ents.push({ y: v.y + 0.8, draw: () => { drawSide(Art.chickenSprite(c.c, hop ? 2 : fr), v.x, v.y + hop, c.f, ox, oy, T, 1); if (c.egg) readyBubble(ox + v.x * T, oy + v.y * T - 8 * SCALE, "egg", now); } });
   }
   for (const pt of state.pets || []) { const v = petViz[pt.owner]; if (v && v.loc === loc && inView(v.x, v.y)) ents.push({ y: v.y + 0.85, draw: () => drawPet(pt, v, ox, oy, now) }); }
   for (const owner in compViz) { const v = compViz[owner]; if (v.loc === loc && inView(v.x, v.y)) ents.push({ y: v.y + 0.85, draw: () => drawMob(v.kind, v, ox, oy, now, 1, true, 0) }); }
@@ -1209,7 +1383,7 @@ function renderFrame(now) {
   if (farm) for (const sm of smoke) { ctx.fillStyle = "rgba(240,240,244," + sm.a + ")"; ctx.beginPath(); ctx.arc(ox + sm.x * T, oy + sm.y * T, sm.r * SCALE, 0, 6.3); ctx.fill(); }
   profMark("highlight");
   // 4. facing highlight
-  const meP = myPlayer();
+  const meP = meNow();
   if (meP) {
     const fx = meP.x + meP.facing[0], fy = meP.y + meP.facing[1], ft = cell(fx, fy), fd = (farm ? tiles : ATL)[fx + "," + fy] || {};
     const hot = farm ? ("S$!+~wmBchblNspg.:".includes(ft) || fd.t || fd.g || chestAt(fx, fy)) : ("~!wmIEFJLOgVQUDBchbljMXy".includes(ft) || fd.g || fd.o || portals.has(loc + "," + fx + "," + fy));
@@ -1264,13 +1438,18 @@ function renderFrame(now) {
     const v = viz[p.name]; if (!v) continue;
     ents.push({ y: v.y + 0.9, draw: () => drawFarmer(p, v.x, v.y, v.facing, v.moving ? 1 + Math.floor(v.dist * 4) % 8 : 0, ox, oy, now, p.held) });
   }
+  for (const name in swings) { const sw = swings[name]; if (!sw.done && sw.x !== undefined && now - sw.start > 140) toolImpact(sw); }
+  drawParts("ground", ox, oy, now, dt, loc);
+  drawClickMark(ox, oy, now);
+  drawHover(ox, oy, now);
   runDust = runDust.filter((d) => now - d.t0 < 420);              // little puffs at a runner's heels
   for (const d of runDust) if (d.loc === loc) { const u = (now - d.t0) / 420; ctx.save(); ctx.globalAlpha = 0.7; dust(ox + d.x * T, oy + d.y * T, u * 0.8); ctx.restore(); }
   for (const name in viz) { const v = viz[name]; if (v.fast && v.loc === loc && now - (v.lastDust || 0) > 130) { v.lastDust = now; runDust.push({ x: v.x + 0.5, y: v.y + 0.92, t0: now, loc }); } }
   ents.sort((a, b) => a.y - b.y).forEach((e) => {
     if (e.tree) {
       ctx.fillStyle = "rgba(0,0,0,.2)"; ctx.beginPath(); ctx.ellipse(e.sx + T / 2, e.sy + T - 2 * SCALE, 18 * SCALE, 6 * SCALE, 0, 0, 6.3); ctx.fill();
-      ctx.drawImage(Art.treeSprite(e.kind, e.variant, e.fruitColor, e.fruit), e.sx - 8 * SCALE, e.sy + T - 62 * SCALE, 48 * SCALE, 64 * SCALE);
+      const wob = e.tx !== undefined ? Math.round(rustleAmt(e.tx, e.ty, now) * 6) * SCALE : 0;    // a tree you bump (or chop) shivers
+      ctx.drawImage(Art.treeSprite(e.kind, e.variant, e.fruitColor, e.fruit), e.sx - 8 * SCALE + wob, e.sy + T - 62 * SCALE, 48 * SCALE, 64 * SCALE);
     } else if (e.big) {
       ctx.fillStyle = "rgba(0,0,0,.2)"; ctx.beginPath(); ctx.ellipse(e.sx + T / 2, e.sy + T - 2 * SCALE, 16 * SCALE, 5 * SCALE, 0, 0, 6.3); ctx.fill();
       ctx.drawImage(e.big, e.sx - 8 * SCALE, e.sy + T - 62 * SCALE, 48 * SCALE, 64 * SCALE);
@@ -1284,13 +1463,18 @@ function renderFrame(now) {
   });
   drawFx(now, ox, oy);
   drawFlying(loc, ox, oy, now);
+  if (!cave) { updateBirds(now, dt, loc, M, x0, y0, x1, y1, night); drawBirds(ox, oy, now, loc); fishJumps(now, dt, loc, M, x0, y0, x1, y1); }
+  drawParts("air", ox, oy, now, dt, loc);
+  drawPrompt(ox, oy, now);
   profMark("ambient");
   // 6. ambient life
   if (!cave && night < 0.1 && hourNow() > 7 && hourNow() < 18.5 && weather === "sun" && season !== "winter") {
     while (butterflies.length < 5) butterflies.push({ x: Math.random() * mapW, y: Math.random() * mapH, p: Math.random() * 6.3, c: ["#fff8d0", "#ffd0e8", "#d8f0ff"][butterflies.length % 3] });
     for (const bf of butterflies) {
       bf.x += Math.sin(now / 900 + bf.p) * dt * 1.2 + 0.2 * dt; bf.y += Math.cos(now / 700 + bf.p) * dt * 0.8;
-      if (bf.x > mapW) bf.x = 0;
+      const fdx = bf.x - (my.x + 0.5), fdy = bf.y - (my.y + 0.2), fd = Math.hypot(fdx, fdy);
+      if (my.ready && fd < 2.3 && fd > 0.01) { bf.x += fdx / fd * dt * 3.8; bf.y += fdy / fd * dt * 2.6 - dt * 0.6; }     // too close: away it flutters
+      if (bf.x > mapW) bf.x = 0; if (bf.x < 0) bf.x = mapW; if (bf.y < 0) bf.y = mapH; if (bf.y > mapH) bf.y = 0;
       const bx = ox + bf.x * T, by = oy + bf.y * T + Math.sin(now / 150 + bf.p) * SCALE, open = Math.sin(now / 90 + bf.p) > 0;
       ctx.fillStyle = bf.c; ctx.fillRect(bx - (open ? 4 : 2) * SCALE, by, 3 * SCALE, 3 * SCALE); ctx.fillRect(bx + SCALE, by, 3 * SCALE, 3 * SCALE);
       ctx.fillStyle = OUT; ctx.fillRect(bx, by + SCALE, SCALE, 2 * SCALE);
@@ -1318,6 +1502,7 @@ function renderFrame(now) {
       if (rain) { ctx.beginPath(); ctx.moveTo(dr.x, dr.y); ctx.lineTo(dr.x - 1.5 * SCALE, dr.y + 5 * SCALE); ctx.stroke(); }
       else ctx.fillRect(dr.x, dr.y, SCALE, SCALE);
     }
+    if (rain && Math.random() < dt * 14) spawn({ kind: "ring", x: x0 + Math.random() * (x1 - x0), y: y0 + Math.random() * (y1 - y0), loc, layer: "ground", col: "rgba(210,235,255,.55)", life: 380, r: 0.22 });
     ctx.fillStyle = rain ? "rgba(40,60,90,.2)" : "rgba(220,230,240,.1)"; ctx.fillRect(0, 0, cw, ch);
   } else drops = [];
   profMark("sky");
@@ -1434,6 +1619,7 @@ function renderFrame(now) {
   drawBanner(now, cw);
   drawCeremony(now, cw, ch, dt);
   if (state.bloom && state.bloom.on && !cave && (night > 0.25 || (state.ceremony && state.ceremony.stage === 4))) fireworks(now, cw, ch, dt);
+  drawFade(now, cw, ch);
   if (Math.floor(now / 1000) !== Math.floor((now - dt * 1000) / 1000)) $("#clock").textContent = skyLabel(hourNow());
 }
 const _areaBld = {};
@@ -1514,10 +1700,12 @@ function renderInterior(now, dt) {
   if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
   ctx.imageSmoothingEnabled = false;
   const mapW = rows[0].length, mapH = rows.length;
-  const [tx, ty] = camTarget(mapW, mapH, cw, ch, my.x + 0.5, my.y + 0.5);
+  leanCam(dt);
+  const [tx, ty] = camTarget(mapW, mapH, cw, ch, my.x + 0.5 + camLead.x, my.y + 0.5 + camLead.y);
   if (cam.snap || Math.abs(tx - cam.x) > 8 || Math.abs(ty - cam.y) > 8) { cam.x = tx; cam.y = ty; cam.snap = false; }
   const k = 1 - Math.exp(-7 * dt); cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k;
-  const ox = Math.round(cw / 2 - cam.x * T), oy = Math.round(ch / 2 - cam.y * T); _ox = ox; _oy = oy;
+  const [shx, shy] = shakeOffset(now);
+  const ox = Math.round(cw / 2 - cam.x * T) + shx, oy = Math.round(ch / 2 - cam.y * T) + shy; _ox = ox; _oy = oy;
   ctx.fillStyle = "#12100e"; ctx.fillRect(0, 0, cw, ch);
   const fr = Math.floor(now / 350) % 2;
   for (let y = 0; y < mapH; y++) for (let x = 0; x < mapW; x++) {
@@ -1549,8 +1737,13 @@ function renderInterior(now, dt) {
     const v = viz[p.name]; if (!v) continue;
     ents.push({ y: v.y + 0.9, draw: () => drawFarmer(p, v.x, v.y, v.facing, v.moving ? 1 + Math.floor(v.dist * 4) % 8 : 0, ox, oy, now, p.held) });
   }
+  for (const name in swings) { const sw = swings[name]; if (!sw.done && sw.x !== undefined && now - sw.start > 140) toolImpact(sw); }
+  drawParts("ground", ox, oy, now, dt, loc);
+  drawClickMark(ox, oy, now);
   ents.sort((a, b) => a.y - b.y).forEach((e) => e.draw());
-  const meP = myPlayer();
+  drawParts("air", ox, oy, now, dt, loc);
+  drawPrompt(ox, oy, now);
+  const meP = meNow();
   if (meP) { const fx = meP.x + meP.facing[0], fy = meP.y + meP.facing[1], c = (rows[fy] || "")[fx]; if (c && "btcfFkpSqhoxWndai".includes(c)) { ctx.strokeStyle = "rgba(255,250,200," + (0.35 + 0.3 * Math.sin(now / 200)) + ")"; ctx.lineWidth = SCALE; ctx.strokeRect(ox + fx * T + 2 * SCALE, oy + fy * T + 2 * SCALE, T - 4 * SCALE, T - 4 * SCALE); } }
   // warm lamp light and a soft vignette
   ctx.imageSmoothingEnabled = true;      // the vignette is soft, so a small one stretched over the room looks the same and costs far less
@@ -1562,6 +1755,7 @@ function renderInterior(now, dt) {
     const shirt = COLORS[catalog.player_colors[p.color % catalog.player_colors.length]] || "#f4f1ea";
     if (p.bubble) drawSpeech(ox + v.x * T + T / 2, oy + v.y * T - 19 * SCALE, p.bubble, shirt); else if (p.name !== prefs.name) drawTag(ox + v.x * T + T / 2, oy + v.y * T - 18 * SCALE, p.name);
   }
+  drawFade(now, cw, ch);
 }
 function drawFarmer(p, x, y, facing, frame, ox, oy, now, held) {
   const shirt = COLORS[catalog.player_colors[p.color % catalog.player_colors.length]] || "#3fc1e6";
@@ -1694,7 +1888,7 @@ function queueStep(v, x, y, now) {
   /* another farmer's new tile: queue it, so we walk the same path they did (round corners, not across them) */
   const last = v.path.length ? v.path[v.path.length - 1] : [v.tx, v.ty];
   if (last[0] === x && last[1] === y) return;
-  if (Math.abs(last[0] - x) + Math.abs(last[1] - y) !== 1 || v.path.length > 8) { v.path = []; v.x = v.tx = x; v.y = v.ty = y; return; }   // a door, a ride, a big lag: just be there
+  if (Math.max(Math.abs(last[0] - x), Math.abs(last[1] - y)) !== 1 || v.path.length > 8) { v.path = []; v.x = v.tx = x; v.y = v.ty = y; return; }   // a door, a ride, a big lag: just be there
   if (v.lastStep) { const iv = (now - v.lastStep) / 1000; if (iv < 0.45) v.iv = v.iv ? v.iv * 0.7 + Math.max(0.07, iv) * 0.3 : Math.max(0.07, iv); }   // a pause isn't their pace
   v.lastStep = now;
   v.path.push([x, y]);
@@ -1706,14 +1900,23 @@ function walkPath(v, dt) {
   let budget = pace * (1 + 0.3 * Math.max(0, v.path.length - 1)) * dt, moved = false;
   while (v.path.length && budget > 0) {
     const [px, py] = v.path[0], dx = px - v.x, dy = py - v.y, d = Math.hypot(dx, dy);
-    if (d > 0.001) v.facing = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : (dy < 0 ? "up" : "down");
+    if (d > 0.001) v.facing = Math.abs(dx) >= Math.abs(dy) * 0.9 ? (dx < 0 ? "left" : "right") : (dy < 0 ? "up" : "down");
     if (d <= budget) { v.x = px; v.y = py; v.tx = px; v.ty = py; v.path.shift(); budget -= d; v.dist += d; }
     else { v.x += dx / d * budget; v.y += dy / d * budget; v.dist += budget; budget = 0; }
     moved = true;
   }
+  if (!v.path.length && budget > 0) {                          // at rest: settle exactly where they stopped inside the tile
+    const gx = v.tx + (v.off ? v.off[0] : 0), gy = v.ty + (v.off ? v.off[1] : 0), dx = gx - v.x, dy = gy - v.y, d = Math.hypot(dx, dy);
+    if (d > 0.002) { const st = Math.min(d, Math.max(budget, 2.5 * dt)); v.x += dx / d * st; v.y += dy / d * st; v.dist += st; moved = d > 0.05; }
+  }
   v.still = moved ? 0 : (v.still || 0) + dt;
   v.moving = v.still < 0.12;
   v.fast = moved && pace > WALK_SPEED * 1.35;
+  if (moved && v.dist - (v.stepAt || 0) > 1 && v.loc === curLoc() && isOutdoor(v.loc)) {   // their footsteps puff too
+    v.stepAt = v.dist;
+    const g = groundAt(v.loc, Math.floor(v.x + 0.5), Math.floor(v.y + 0.75)), cols = STEP_LOOK[g] || STEP_LOOK.path;
+    if (g !== "grass" && g !== "wood") burst(2, { x: v.x + 0.5, y: v.y + 0.93, loc: v.loc, layer: "ground", col: cols, life: 340, size: 1.5, g: 2 }, { up: 0.6, speed: 0.7, r: 0.3, flat: true });
+  }
   if (!v.moving && v.sfacing) v.facing = v.sfacing;            // standing: face wherever they turned
 }
 function readyBubble(sx, sy, key, now) {
@@ -1764,13 +1967,25 @@ function drawMob(kind, v, ox, oy, now, hp, tame, hurt) {
   }
 }
 function drawNpc(name, v, ox, oy, now) {
-  const look = (catalog.npcs || {})[name] || ["boy", "white", "none"], f = v.f || [0, 1];
+  const look = (catalog.npcs || {})[name] || ["boy", "white", "none"];
+  let f = v.f || [0, 1];
+  const near = my.ready && v.loc === my.loc && Math.abs(my.x - v.x) <= 1.6 && Math.abs(my.y - v.y) <= 1.6;
+  if (near && !v.moving) {                                   // standing near you: they turn to look at you
+    const dx = my.x - v.x, dy = my.y - v.y;
+    f = Math.abs(dx) > Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy) || 1];
+    if (now - (v.greeted || -1e9) > 120000 && now - lastGreet > 3500 && !v.b) { v.greeted = now; lastGreet = now; v.hi = { text: GREETS[(hash(name.length, Math.floor(now / 1000)) >>> 0) % GREETS.length], until: now + 1700 }; }
+  }
+  if (v.b && v.b !== v.lastB && /<3|!/.test(v.b)) { v.hop = now; for (let i = 0; i < 3; i++) spawn({ kind: "heart", x: v.x + 0.5 + (i - 1) * 0.3, y: v.y + 0.2, z: 0.4, vz: 1.5 + i * 0.25, g: 1.2, loc: v.loc, col: "#ff6b9d", life: 1000 }); }
+  v.lastB = v.b;
+  const hopY = v.hop && now - v.hop < 520 ? -Math.abs(Math.sin((now - v.hop) / 520 * Math.PI * 2)) * 0.18 : 0;
+  v = hopY ? Object.assign({}, v, { y: v.y + hopY }) : v;
   const ci = Math.max(0, (catalog.player_colors || []).indexOf(look[1])), own = Art.LOOKS && Art.LOOKS[name];   // everyone has a look of their own
   drawFarmer({ name, color: ci, sprite: own ? name : look[0], hat: own ? "none" : look[2], facing: f }, v.x, v.y, facingName(f), v.moving ? 1 + Math.floor(v.dist * 4) % 8 : 0, ox, oy, now, null);
   const px_ = ox + v.x * T + T / 2, py_ = oy + v.y * T - 18 * SCALE;
   const mark = me && me.quest_marks && me.quest_marks[name];
   if (mark) drawQuestMark(px_, py_ - 4 * SCALE, mark, now);
   else if (v.b) drawBubble(px_, py_ - 2 * SCALE, v.b);
+  else if (v.hi && now < v.hi.until) drawBubble(px_, py_ - 2 * SCALE, v.hi.text);
   if (!mark && !v.b && my.ready && Math.abs(my.x - v.x) + Math.abs(my.y - v.y) < 3.5) drawTag(px_, py_, name);
   else if (mark && my.ready && Math.abs(my.x - v.x) + Math.abs(my.y - v.y) < 3.5) drawTag(px_, py_ + 12 * SCALE, name);
 }
@@ -1837,6 +2052,320 @@ function lanternSpots(ox, oy, now) {
     }
   }
   return out;
+}
+// ------------------------------------------------------------------ the little things that make it feel alive
+// Particles live in the world (tile units): dust from footsteps, soil from the hoe, chips from the axe and pickaxe, drops from the
+// can, sparkles from a harvest, hearts for a happy animal. Some sit on the ground, some fly; all are tiny squares, like the art.
+const parts = [];
+function spawn(p) { p.t0 = p.t0 || performance.now(); if (parts.length > 320) parts.splice(0, parts.length - 320); parts.push(p); }
+function burst(n, base, spread) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * 6.283, sp = (spread.speed || 1.5) * (0.5 + Math.random());
+    spawn(Object.assign({}, base, { x: base.x + (Math.random() - 0.5) * (spread.r || 0.3), y: base.y + (Math.random() - 0.5) * (spread.r || 0.3) * 0.6,
+      vx: Math.cos(a) * sp * (spread.flat ? 1 : 0.7), vy: Math.sin(a) * sp * 0.35, vz: (spread.up || 2) * (0.6 + Math.random() * 0.6), z: base.z || 0.2,
+      col: Array.isArray(base.col) ? base.col[i % base.col.length] : base.col, life: (base.life || 500) * (0.75 + Math.random() * 0.5) }));
+  }
+}
+function drawParts(layer, ox, oy, now, dt, loc) {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i], age = now - p.t0;
+    if (age > p.life) { parts.splice(i, 1); continue; }
+    if ((p.layer || "air") !== layer || p.loc !== loc) continue;
+    const u = age / p.life;
+    if (p.kind !== "ring") {                                     // a little physics: drift, fall, bounce once, settle
+      p.x += (p.vx || 0) * dt; p.y += (p.vy || 0) * dt;
+      if (p.vz !== undefined) { p.vz -= (p.g === undefined ? 9 : p.g) * dt; p.z = (p.z || 0) + p.vz * dt; if (p.z < 0) { p.z = 0; p.vz = Math.abs(p.vz) > 1 ? -p.vz * 0.35 : 0; p.vx *= 0.5; p.vy *= 0.5; } }
+    }
+    const sx = ox + p.x * T, sy = oy + (p.y - (p.z || 0)) * T, a = p.fade === false ? 1 : Math.min(1, (1 - u) * 1.6);
+    ctx.globalAlpha = a;
+    if (p.kind === "ring") {
+      const r = (0.12 + u * (p.r || 0.45)) * T;
+      ctx.strokeStyle = p.col; ctx.lineWidth = Math.max(1, SCALE * 0.75); ctx.beginPath(); ctx.ellipse(sx, sy, r, r * 0.45, 0, 0, 6.3); ctx.stroke();
+    } else if (p.kind === "heart") {
+      const z = SCALE, hx = Math.round(sx - 3 * z), hy = Math.round(sy - 3 * z);
+      ctx.fillStyle = OUTLINE; ctx.fillRect(hx - z, hy, 8 * z, 4 * z); ctx.fillRect(hx, hy - z, 6 * z, 6 * z); ctx.fillRect(hx + z, hy + 5 * z, 4 * z, z); ctx.fillRect(hx + 2 * z, hy + 6 * z, 2 * z, z);
+      ctx.fillStyle = p.col; ctx.fillRect(hx, hy, 2 * z, 4 * z); ctx.fillRect(hx + 4 * z, hy, 2 * z, 4 * z); ctx.fillRect(hx + z, hy + z, 4 * z, 4 * z); ctx.fillRect(hx + 2 * z, hy + 5 * z, 2 * z, z);
+      ctx.fillStyle = "#ffd6e6"; ctx.fillRect(hx + z, hy + z, z, z);
+    } else if (p.kind === "print") {
+      const z = SCALE; ctx.fillStyle = p.col;
+      if (p.vert) { ctx.fillRect(Math.round(sx - z), Math.round(sy - 3 * z), 2 * z, 3 * z); ctx.fillRect(Math.round(sx - z), Math.round(sy + z), 2 * z, 2 * z); }   // toe and heel
+      else { ctx.fillRect(Math.round(sx - 3 * z), Math.round(sy - z), 3 * z, 2 * z); ctx.fillRect(Math.round(sx + z), Math.round(sy - z), 2 * z, 2 * z); }
+    } else if (p.kind === "fish") {
+      if (p.z <= 0 && age > 100) { p.life = 0; continue; }
+      const z = SCALE, up = p.vz > 0;
+      ctx.save(); ctx.translate(Math.round(sx), Math.round(sy)); if (p.vx < 0) ctx.scale(-1, 1); ctx.rotate(up ? -0.5 : 0.5);
+      ctx.fillStyle = OUTLINE; ctx.fillRect(-4 * z, -2 * z, 8 * z, 4 * z); ctx.fillStyle = "#4a86c8"; ctx.fillRect(-3 * z, -z, 6 * z, 2 * z); ctx.fillStyle = "#a8d8f0"; ctx.fillRect(-2 * z, 0, 4 * z, z);
+      ctx.fillStyle = OUTLINE; ctx.fillRect(-6 * z, -2 * z, 2 * z, 4 * z); ctx.fillStyle = "#1a1210"; ctx.fillRect(2 * z, -z, z, z);
+      ctx.restore();
+    } else if (p.kind === "icon") {
+      const s2 = 16 * SCALE * (u < 0.15 ? 0.6 + u / 0.15 * 0.4 : 1);
+      ctx.drawImage(itemIcon(p.key, catalog), Math.round(sx - s2 / 2), Math.round(sy - s2 / 2), s2, s2);
+    } else if (p.kind === "star") {
+      const z = SCALE, s2 = Math.max(1, Math.round((1 - u * 0.6) * (p.size || 1.5))) * z;
+      ctx.fillStyle = p.col; ctx.fillRect(Math.round(sx - s2 / 2), Math.round(sy - s2 * 1.5), s2, s2 * 3); ctx.fillRect(Math.round(sx - s2 * 1.5), Math.round(sy - s2 / 2), s2 * 3, s2);
+    } else {
+      const sz = Math.max(1, Math.round((p.size || 1.5) * (p.shrink === false ? 1 : 1 - u * 0.5))) * SCALE;
+      ctx.fillStyle = p.col; ctx.fillRect(Math.round(sx - sz / 2), Math.round(sy - sz / 2), sz, sz);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+const OUTLINE = "#2b1f17";
+const camLead = { x: 0, y: 0 };
+function leanCam(dt) {
+  /* the camera looks a little ahead of where we're walking, and settles back when we stop */
+  const k = 1 - Math.exp(-3.5 * dt);
+  camLead.x += (my.vx * 0.28 - camLead.x) * k; camLead.y += (my.vy * 0.22 - camLead.y) * k;
+}
+let shake = null;
+const calm = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function shakeCam(mag, ms) { if (!calm) shake = { mag: mag * SCALE, until: performance.now() + ms, ms }; }
+function shakeOffset(now) {
+  if (!shake || now > shake.until) return [0, 0];
+  const k = (shake.until - now) / shake.ms * shake.mag;
+  return [Math.round((Math.random() - 0.5) * 2 * k), Math.round((Math.random() - 0.5) * 2 * k)];
+}
+function groundAt(loc, x, y) {
+  /* what's underfoot: "path", "grass", "soil", "snow", "sand", "wood" or "stone" */
+  const rows = curMap(), ch = (rows[y] || "")[x];
+  if (!isOutdoor(loc)) return ch === "r" ? "rug" : "wood";
+  if (/^(mine|deep)/.test(loc)) return "stone";
+  const winter = state && state.season === "winter" && loc !== "island";
+  if (loc === "farm") { const d = tiles[x + "," + y]; if (d && d.s) return "soil"; }
+  const g = (RG[y] || [])[x] || ch;
+  if (g === "H") return "wood";
+  if (g === "," || g === "z") return winter && g === "," ? "snow" : "sand";
+  if (g === ":" || g === "d" || g === "=" || g === "r" || g === "v") return winter ? "snow" : g === "=" ? "stone" : "path";
+  return winter ? "snow" : "grass";
+}
+const STEP_LOOK = { path: ["#d9c29a", "#c9ae82"], sand: ["#f0dfb4", "#e2cc98"], soil: ["#8a5a34", "#a8744a"], grass: ["#7cc25a", "#5fa046", "#a8d86a"],
+  snow: ["#ffffff", "#e8f2ff"], stone: ["#b8b2a8", "#9a948a"], wood: ["#c9a06a", "#a67c4a"], rug: ["#c9a06a"] };
+function footsteps(now, loc) {
+  /* a puff (or a few grass bits, or snow) at each footfall, and the softest step sound */
+  if (my.dist - (my.lastStepDist || 0) < 0.95) return;
+  my.lastStepDist = my.dist;
+  const [fx, fy] = footTile(my.x, my.y), g = groundAt(loc, fx, fy), cols = STEP_LOOK[g] || STEP_LOOK.path;
+  const base = { x: my.x + 0.5, y: my.y + 0.93, loc, layer: "ground", col: cols, life: g === "grass" ? 420 : 360, size: g === "grass" ? 1 : 1.6, g: g === "grass" ? 7 : 2 };
+  if (g === "snow" || g === "sand") { my.foot = !my.foot; const [dx, dy] = DELTA[my.dir], side = my.foot ? 0.12 : -0.12; spawn({ kind: "print", x: my.x + 0.5 + (dy ? side : 0), y: my.y + 0.9 + (dx ? side * 0.6 : 0), vert: !!dy, loc, layer: "ground", col: g === "snow" ? "rgba(140,160,195,.65)" : "rgba(140,105,60,.5)", life: 5000, fade: true }); }
+  if (g === "grass") { if (Math.random() < 0.55) burst(2, base, { up: 1.4, speed: 0.9, r: 0.25 }); }
+  else if (g !== "rug" && g !== "wood") burst(g === "snow" ? 4 : 3, base, { up: 0.7, speed: 0.8, r: 0.3, flat: true });
+  sfx("step", g);
+}
+function toolImpact(sw) {
+  /* the moment a swing lands: soil flies from the hoe, water splashes from the can, chips fly from the axe and pickaxe */
+  if (sw.x === undefined || sw.done) return;
+  sw.done = true;
+  const loc = sw.loc || curLoc(), x = sw.x + 0.5, y = sw.y + 0.7, mine = sw.who === prefs.name;
+  if (sw.tool === "hoe") { burst(8, { x, y, loc, col: ["#8a5a34", "#a8744a", "#6b4629"], life: 520, size: 1.6 }, { up: 2.6, speed: 1.6 }); if (mine) sfx("dig"); }
+  else if (sw.tool === "watering_can") { burst(9, { x, y: y - 0.1, loc, col: ["#7fd0f4", "#bfeaff", "#4aa3df"], life: 480, size: 1.2, g: 11 }, { up: 1.2, speed: 1.4 }); spawn({ kind: "ring", x, y: y + 0.1, loc, layer: "ground", col: "rgba(190,235,255,.9)", life: 520, r: 0.5 }); }
+  else if (sw.tool === "pickaxe") { burst(9, { x, y: y - 0.2, loc, col: ["#9a948a", "#c7c1b5", "#6c6964", "#fff2a0"], life: 520, size: 1.5 }, { up: 3, speed: 2 }); if (mine) { shakeCam(1.6, 140); sfx("tink"); } }
+  else if (sw.tool === "axe") { burst(9, { x, y: y - 0.3, loc, col: ["#c9a06a", "#e6c48a", "#8a5a34", "#5fa046"], life: 560, size: 1.6 }, { up: 3, speed: 2 }); if (mine) { shakeCam(1.4, 140); sfx("chop"); } }
+  else if (sw.tool === "scythe") burst(8, { x, y: y - 0.1, loc, col: ["#7cc25a", "#a8d86a", "#5fa046"], life: 520, size: 1.2, g: 6 }, { up: 2, speed: 2.2 });
+  else if (sw.tool === "sword") burst(6, { x, y: y - 0.4, loc, col: ["#ffffff", "#fff2a0"], life: 300, size: 1.2, g: 0 }, { up: 0, speed: 3 });
+  else if (sw.tool === "hand") {
+    for (let i = 0; i < 5; i++) spawn({ kind: "star", x: x + (Math.random() - 0.5) * 0.6, y: y - 0.3, z: 0.2 + Math.random() * 0.4, vz: 1.2 + Math.random(), g: 1.5, loc, col: ["#fff2a0", "#ffffff", "#ffd84a"][i % 3], life: 600, size: 1.4 });
+    const animal = (state.cows || []).some((c) => c.x === sw.x && c.y === sw.y) || (state.chickens || []).some((c) => c.x === sw.x && c.y === sw.y);
+    if (animal) for (let i = 0; i < 3; i++) spawn({ kind: "heart", x: x + (i - 1) * 0.3, y: y - 0.6, z: 0.3, vz: 1.4 + i * 0.3, g: 1.2, loc, col: "#ff6b9d", life: 900 });
+  }
+}
+// rustling: grass and flowers sway when you walk through them, bushes and trees shiver when you bump them
+const rustle = new Map();
+function rustleAmt(x, y, now) {
+  const t0 = rustle.get(x + "," + y); if (t0 === undefined) return 0;
+  const t = (now - t0) / 1000; if (t > 0.75) { rustle.delete(x + "," + y); return 0; }
+  return Math.sin(t * 26) * 0.32 * (1 - t / 0.75);
+}
+function swayDraw(img, x, y, w, h, amt) {
+  if (!amt) { ctx.drawImage(img, x, y, w, h); return; }
+  ctx.save(); ctx.translate(x + w / 2, y + h); ctx.transform(1, 0, -amt, 1, 0, 0); ctx.drawImage(img, -w / 2, -h, w, h); ctx.restore();
+}
+function hasDecor(x, y) {
+  const M = curMap(), loc = curLoc();
+  if (!isOutdoor(loc) || AREA_BASE[loc] || (M[y] || "")[x] !== "." || (loc === "farm" ? tiles : areaTiles(loc))[x + "," + y]) return false;
+  const h = hash(x * 5 + 2, y * 3 + 1), n = Art.noise2(x, y);
+  return (h % 100) / 100 <= 0.10 + n * 0.12;
+}
+function leaves(x, y, loc, cols, n) { burst(n, { x: x + 0.5, y: y + 0.6, z: 0.5, loc, col: cols, life: 900, size: 1.2, g: 1.6 }, { up: 1.2, speed: 0.9, r: 0.5 }); }
+function brushPast(x, y, now) {
+  const loc = curLoc(), ch = (curMap()[y] || "")[x];
+  if (hasDecor(x, y) || ch === "f") { rustle.set(x + "," + y, now); leaves(x, y, loc, ch === "f" ? ["#ff9cc6", "#ffe066", "#7cc25a"] : ["#7cc25a", "#a8d86a"], 2); }
+}
+function bumpInto(now) {
+  /* leaning on a bush or a tree gives it a shake (and shakes a few leaves loose), like nudging one in Stardew */
+  const [dx, dy] = DELTA[my.dir], x = my.tx + dx, y = my.ty + dy, key = x + "," + y, ch = (curMap()[y] || "")[x];
+  const d = (curLoc() === "farm" ? tiles : areaTiles(curLoc()))[key] || {};
+  if (!("uTPA".includes(ch) || d.t) || now - (bumped.get(key) || 0) < 650) return;
+  bumped.set(key, now); rustle.set(key, now);
+  leaves(x, y - (ch === "u" ? 0 : 0.6), curLoc(), ch === "u" ? ["#ff9ccf", "#5fb04a", "#8ed66a"] : state && state.season === "fall" ? ["#e0802a", "#c8582a", "#f2c744"] : state && state.season === "winter" ? ["#ffffff", "#e8f2ff"] : ["#5fb04a", "#8ed66a", "#3f8f3a"], ch === "u" ? 3 : 4);
+}
+const bumped = new Map();
+const GREETS = ["Hi!", "Hey!", "Oh, hi!", "♪", "Hello!", "Howdy!"];
+let lastGreet = 0;
+
+// the prompt: what E does to whatever's in front of you, in a little bubble over it (like Animal Crossing's button prompts)
+let promptKey = "", promptVerb = "", promptAt = 0;
+function promptFor() {
+  const [dx, dy] = DELTA[my.dir], fx = my.tx + dx, fy = my.ty + dy, loc = curLoc(), sel = heldItem(), it = sel && catalog.items[sel], kind = it ? it.kind : null;
+  if ((state.npcs || []).some((n) => n.loc === loc && n.x === fx && n.y === fy)) return "Chat";
+  if (isOutdoor(loc)) {
+    const d = (loc === "farm" ? tiles : areaTiles(loc))[fx + "," + fy] || {}, ch = (curMap()[fy] || "")[fx];
+    if (d.c) return d.c[2] ? "Harvest" : sel === "watering_can" && !d.w ? "Water" : "";
+    if (d.g) return "Pick up";
+    if (d.o) return sel === "pickaxe" ? "Mine" : "";
+    if (d.t) return d.t[2] ? "Pick fruit" : sel === "axe" ? "Chop" : "";
+    if (d.m) return d.m[1] === 2 ? "Collect" : "Use";
+    if (d.s) return (kind === "seed" || kind === "sapling") ? "Plant" : sel === "watering_can" && !d.w ? "Water" : "";
+    if (loc === "farm" && ch === "d" && sel === "hoe") return "Till";
+    if (ch === "~") return sel === "fishing_rod" ? "Cast" : sel === "watering_can" ? "Refill" : "";
+  }
+  const text = describeHere(), i = text.indexOf("Ahead:");
+  if (i < 0) return "";
+  const m = /\bE (?:to|for) (?:the )?([^,.!;(]+)/.exec(text.slice(i));
+  if (!m) return "";
+  let v = m[1].trim().replace(/^your /, "").replace(/ it$/, "");
+  if (v.length > 18) v = v.slice(0, 17).replace(/\s+\S*$/, "") + "…";
+  return v.charAt(0).toUpperCase() + v.slice(1);
+}
+function drawPrompt(ox, oy, now) {
+  if (!my.ready || mode !== "play" || my.stepping || my.route) { promptKey = ""; return; }
+  const [dx, dy] = DELTA[my.dir], fx = my.tx + dx, fy = my.ty + dy;
+  const key = curLoc() + fx + "," + fy + heldItem() + (state && state.now);
+  if (key !== promptKey) { const v = promptFor(); if (v !== promptVerb) promptAt = now; promptVerb = v; promptKey = key; }
+  if (!promptVerb) return;
+  const npc = (state.npcs || []).find((n) => n.loc === curLoc() && n.x === fx && n.y === fy);
+  const t = Math.min(1, (now - promptAt) / 160), pop = t < 1 ? 0.6 + 0.4 * Math.sin(t * Math.PI / 2) + 0.12 * Math.sin(t * Math.PI) : 1;
+  const nv = npc && npcViz[npc.n], talking = nv && (nv.b || (nv.hi && now < nv.hi.until) || (me && me.quest_marks && me.quest_marks[npc.n]));
+  const bx = ox + (fx + 0.5) * T, by = oy + (fy - (npc ? (talking ? 1.85 : 1.25) : 0.35)) * T + Math.sin(now / 260) * 1.5 * SCALE;
+  ctx.save(); ctx.translate(bx, by); ctx.scale(pop, pop);
+  ctx.font = "600 " + 7 * SCALE + "px 'Pixelify Sans', 'Trebuchet MS', sans-serif"; ctx.textBaseline = "middle";
+  const tw = ctx.measureText(promptVerb).width, kw = 9 * SCALE, w = kw + tw + 7 * SCALE, h = 11 * SCALE;
+  ctx.fillStyle = "rgba(43,31,23,.92)"; ctx.fillRect(-w / 2, -h, w, h); ctx.fillRect(-w / 2 + SCALE, -h - SCALE, w - 2 * SCALE, h + 2 * SCALE);
+  ctx.fillRect(-2 * SCALE, 0, 4 * SCALE, SCALE); ctx.fillRect(-SCALE, SCALE, 2 * SCALE, SCALE);
+  ctx.fillStyle = "#fbeec8"; ctx.fillRect(-w / 2 + 2 * SCALE, -h + 2 * SCALE, kw - SCALE, h - 4 * SCALE);
+  ctx.fillStyle = "#3a2a1a"; ctx.textAlign = "center"; ctx.fillText("E", -w / 2 + 2 * SCALE + (kw - SCALE) / 2, -h / 2 + SCALE / 2);
+  ctx.fillStyle = "#fbeec8"; ctx.textAlign = "left"; ctx.fillText(promptVerb, -w / 2 + kw + 3 * SCALE, -h / 2 + SCALE / 2);
+  ctx.restore();
+}
+
+// birds: a few sparrows hop and peck about on the grass, and take off in a flurry if you come too close
+const birds = [];
+const BIRD_COLS = [["#8a5a34", "#c9a06a", "#5a3a22"], ["#4a7fd0", "#a8c8f0", "#2e4a8a"], ["#7a5a4a", "#e0603a", "#4a3428"]];
+let birdNext = 0;
+function updateBirds(now, dt, loc, M, x0, y0, x1, y1, night) {
+  for (let i = birds.length - 1; i >= 0; i--) if (birds[i].loc !== loc || birds[i].z > 7 || birds[i].x < x0 - 6 || birds[i].x > x1 + 6) birds.splice(i, 1);
+  if (night < 0.3 && birds.length < 4 && now > birdNext && my.ready && !AREA_BASE[loc]) {
+    birdNext = now + 2500 + Math.random() * 3000;
+    for (let tries = 0; tries < 12; tries++) {
+      const x = x0 + 1 + Math.floor(Math.random() * Math.max(1, x1 - x0 - 2)), y = y0 + 1 + Math.floor(Math.random() * Math.max(1, y1 - y0 - 2));
+      if ((M[y] || "")[x] !== "." || Math.hypot(x - my.x, y - my.y) < 5 || !walkable(x, y)) continue;
+      const n = 1 + Math.floor(Math.random() * 2);
+      for (let k = 0; k < n; k++) birds.push({ loc, x: x + 0.3 + Math.random() * 0.4 + k * 0.5, y: y + 0.5 + Math.random() * 0.3, z: 0, vx: 0, vy: 0, vz: 0, fly: false, next: now + Math.random() * 800, f: Math.random() < 0.5 ? -1 : 1, col: BIRD_COLS[(x + y) % BIRD_COLS.length], peck: 0 });
+      break;
+    }
+  }
+  const fast = Math.hypot(my.vx, my.vy) > WALK_SPEED * 1.2;
+  for (const b of birds) {
+    if (!b.fly) {
+      const d = Math.hypot(b.x - (my.x + 0.5), b.y - (my.y + 0.8));
+      if (my.ready && d < (fast ? 3.6 : 2.4)) {                        // startled: up and away
+        b.fly = true; const a = Math.atan2(b.y - my.y - 0.8, b.x - my.x - 0.5);
+        b.vx = Math.cos(a) * 4.5 + (Math.random() - 0.5); b.vy = Math.sin(a) * 2; b.vz = 3.2 + Math.random(); b.f = b.vx < 0 ? -1 : 1;
+        if (b === birds.find((o) => o.fly)) sfx("chirp");
+        continue;
+      }
+      if (now > b.next) {                                               // hop, or peck at the ground
+        b.next = now + 500 + Math.random() * 1300;
+        if (Math.random() < 0.55) { b.f = Math.random() < 0.5 ? -1 : 1; const nx = b.x + b.f * (0.25 + Math.random() * 0.35); if (walkable(Math.floor(nx), Math.floor(b.y))) { b.hopFrom = b.x; b.hopTo = nx; b.hopT = now; } }
+        else b.peck = now;
+      }
+      if (b.hopT) { const u = (now - b.hopT) / 220; if (u >= 1) { b.x = b.hopTo; b.hopT = 0; b.z = 0; } else { b.x = b.hopFrom + (b.hopTo - b.hopFrom) * u; b.z = Math.sin(u * Math.PI) * 0.18; } }
+    } else { b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt; b.vz += 0.8 * dt; }
+  }
+}
+function drawBirds(ox, oy, now, loc) {
+  const z = SCALE;
+  for (const b of birds) {
+    if (b.loc !== loc) continue;
+    const sx = Math.round(ox + b.x * T), sy = Math.round(oy + b.y * T), by = Math.round(sy - b.z * T);
+    ctx.fillStyle = "rgba(0,0,0," + (0.18 * Math.max(0, 1 - b.z / 3)).toFixed(3) + ")"; ctx.fillRect(sx - 3 * z, sy - z, 6 * z, 2 * z);
+    const [body, belly, dark] = b.col, flap = b.fly ? Math.floor(now / 70) % 2 : 0, pk = !b.fly && b.peck && now - b.peck < 260 ? 2 : 0;
+    ctx.save(); ctx.translate(sx, by); if (b.f < 0) ctx.scale(-1, 1);
+    ctx.fillStyle = OUTLINE; ctx.fillRect(-4 * z, -5 * z, 8 * z, 4 * z); ctx.fillRect(1 * z, (-7 + pk) * z, 4 * z, 4 * z);
+    ctx.fillStyle = body; ctx.fillRect(-3 * z, -4 * z, 6 * z, 2 * z); ctx.fillStyle = belly; ctx.fillRect(-2 * z, -3 * z, 4 * z, z);
+    ctx.fillStyle = dark; ctx.fillRect(2 * z, (-6 + pk) * z, 2 * z, 2 * z); ctx.fillStyle = "#f2a33a"; ctx.fillRect(4 * z, (-5 + pk) * z, z, z);
+    ctx.fillStyle = "#1a1210"; ctx.fillRect(3 * z, (-6 + pk) * z, z, z); ctx.fillStyle = dark; ctx.fillRect(-5 * z, -5 * z, 2 * z, z);
+    if (b.fly) { ctx.fillStyle = body; if (flap) ctx.fillRect(-2 * z, -8 * z, 3 * z, 3 * z); else ctx.fillRect(-2 * z, -3 * z, 3 * z, 2 * z); }
+    else { ctx.fillStyle = "#f2a33a"; ctx.fillRect(-z, -z, z, z); ctx.fillRect(z, -z, z, z); }
+    ctx.restore();
+  }
+}
+// now and then a fish jumps in a pond, the river or the sea
+let fishNext = 0;
+function fishJumps(now, dt, loc, M, x0, y0, x1, y1) {
+  if (now < fishNext) return;
+  fishNext = now + 2500 + Math.random() * 4500;
+  for (let tries = 0; tries < 10; tries++) {
+    const x = x0 + Math.floor(Math.random() * (x1 - x0 + 1)), y = y0 + Math.floor(Math.random() * (y1 - y0 + 1));
+    if ((M[y] || "")[x] !== "~" || (M[y] || "")[x + 1] !== "~" || (M[y - 1] || "")[x] !== "~") continue;
+    const dir = Math.random() < 0.5 ? -1 : 1, fx = x + 0.5, fy = y + 0.5;
+    spawn({ kind: "ring", x: fx, y: fy, loc, layer: "ground", col: "rgba(220,245,255,.85)", life: 600, r: 0.45 });
+    spawn({ kind: "fish", x: fx, y: fy, vx: dir * 1.1, z: 0, vz: 3.1, g: 9, loc, col: "#2e5a8a", life: 720, fade: false, shrink: false, size: 2 });
+    setTimeout(() => spawn({ kind: "ring", x: fx + dir * 0.8, y: fy, loc, layer: "ground", col: "rgba(220,245,255,.85)", life: 600, r: 0.4 }), 680);
+    break;
+  }
+}
+// picking things up: a little card slides in at the bottom left (merging repeats, like Stardew's), and the item pops over your head
+let lastInv = null;
+function noticePickups() {
+  const inv = {}; for (const [k, n] of (me && me.inventory) || []) inv[k] = (inv[k] || 0) + n;
+  if (lastInv) for (const k in inv) { const d = inv[k] - (lastInv[k] || 0); if (d > 0 && !TOOLS.has(k)) gotItem(k, d); }
+  lastInv = inv;
+}
+function gotItem(key, n) {
+  const box = $("#pickups"); if (!box || !catalog || !catalog.items[key]) return;
+  const now = performance.now(), it = catalog.items[key];
+  let row = box.lastElementChild;
+  if (row && row.dataset.key === key && now - +row.dataset.at < 2500) { row.dataset.n = +row.dataset.n + n; row.querySelector(".n").textContent = "×" + row.dataset.n; row.classList.remove("bump"); void row.offsetWidth; row.classList.add("bump"); }
+  else {
+    row = el("div", "pick"); row.dataset.key = key; row.dataset.n = n;
+    const c = blank(32, 32); c.getContext("2d").drawImage(itemIcon(key, catalog), 0, 0); row.appendChild(c);
+    row.appendChild(el("span", "name", it.name)); row.appendChild(el("b", "n", "×" + n));
+    box.appendChild(row); while (box.children.length > 5) box.firstElementChild.remove();
+  }
+  row.dataset.at = now;
+  clearTimeout(row._t); row._t = setTimeout(() => { row.classList.add("out"); setTimeout(() => row.remove(), 400); }, 2800);
+  if (my.ready) spawn({ kind: "icon", key, x: my.x + 0.5, y: my.y + 0.1, z: 0.5, vz: 1.6, g: 2.2, loc: curLoc(), life: 760, fade: true });
+}
+// the coin counter rolls up (or down) to the new total instead of jumping, with a little flash
+let coinShown = null, coinTarget = null, coinAt = 0;
+function rollCoins(now) {
+  if (coinTarget === null) return;
+  if (coinShown === null) coinShown = coinTarget;
+  const dt = Math.min(0.1, (now - (coinAt || now)) / 1000); coinAt = now;
+  if (coinShown !== coinTarget) {
+    const diff = coinTarget - coinShown, step = Math.sign(diff) * Math.max(1, Math.abs(diff) * Math.min(1, dt * 7));
+    coinShown = Math.abs(step) >= Math.abs(diff) ? coinTarget : Math.round(coinShown + step);
+  }
+  setText($("#coins"), coinShown + "g");
+}
+let fade = null;
+function startFade() { fade = { dir: "out", t0: performance.now() }; }
+function fadeIn() { if (fade) fade = { dir: "in", t0: performance.now() }; }
+function drawFade(now, cw, ch) {
+  /* doors and map edges dip to black and back, like walking into another room */
+  if (!fade) return;
+  const t = now - fade.t0;
+  let a;
+  if (fade.dir === "out") { a = Math.min(1, t / 140); if (t > 1600) fadeIn(); }
+  else { a = 1 - t / 300; if (a <= 0) { fade = null; return; } }
+  ctx.fillStyle = "rgba(12,10,8," + a.toFixed(3) + ")"; ctx.fillRect(0, 0, cw, ch);
+}
+function drawClickMark(ox, oy, now) {
+  if (!clickMark) return;
+  const t = (now - clickMark.t0) / 450; if (t > 1) { clickMark = null; return; }
+  const cx = ox + (clickMark.x + 0.5) * T, cy = oy + (clickMark.y + 0.8) * T, r = (0.2 + t * 0.25) * T;
+  ctx.strokeStyle = clickMark.bad ? "rgba(255,120,110," + (1 - t) + ")" : "rgba(255,250,210," + (1 - t) + ")"; ctx.lineWidth = SCALE;
+  ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.45, 0, 0, 6.3); ctx.stroke();
 }
 let rockets = [], sparks = [], nextRocket = 0;
 function fireworks(now, cw, ch, dt) {
@@ -1957,6 +2486,7 @@ function drawStars(cw, ch, now) {
   if (wishStar && now > wishStar.until) { wishStar = null; $("#wish").classList.add("hidden"); }
 }
 function updateHudLive(now) {
+  rollCoins(now);
   if (!me) return;
   const hpb = $("#hpbar"), loc = curLoc(), show = me.hp < me.max_hp || /^(mine|deep)/.test(loc);
   hpb.classList.toggle("hidden", !show);

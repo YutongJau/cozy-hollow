@@ -6,6 +6,7 @@ seasons, growth simulation and the rules for what a player can do.  Both the
 server and the client import this file so they always agree on the world.
 """
 import hashlib
+import math
 import json
 import os
 import random
@@ -502,6 +503,10 @@ def clean_msg(msg):
         elif isinstance(v, str):
             out[k] = v[:400]
     return out
+
+
+FACE_DIRS = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
+FACE_ACTS = {"move", "interact", "fish_start", "clear", "face", "rest", "eat"}
 
 
 def level_for(xp):
@@ -1467,7 +1472,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
                     color=p["color"], sprite=p.get("sprite", "boy"), online=bool(p.get("online")),
                     bubble=bubble[0] if bubble else None,
                     level=level_for(p["xp"]), title=title_for(level_for(p["xp"])),
-                    fishing=bool(p.get("fishing")))
+                    fishing=bool(p.get("fishing")), o=p.get("off"))
         self._run("pub", p, d, now)
         return d
 
@@ -1546,6 +1551,8 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
             return self.out
         msg = clean_msg(msg)                 # anything off the wire: numbers are numbers, names are strings, or they're dropped
         t = msg.get("t")
+        if msg.get("f") in FACE_DIRS and t in FACE_ACTS:     # the browser moves freely: it says which way you face as you act
+            p["facing"] = list(FACE_DIRS[msg["f"]])
         handler = getattr(self, "act_" + str(t), None)
         self._coin_src = str(t)            # the ledger files any coins this action moves under its name
         if handler is None:
@@ -1561,7 +1568,8 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         dy = max(-1, min(1, int(msg.get("dy", 0))))
         if not (dx or dy):
             return
-        p["facing"] = [dx, dy]
+        p["facing"] = list(FACE_DIRS[msg["f"]]) if msg.get("f") in FACE_DIRS else ([dx, 0] if dx else [0, dy])
+        p.pop("off", None)
         nx, ny = p["x"] + dx, p["y"] + dy
         loc = p.get("loc", "farm")
         if self.terrain(nx, ny, loc) == "D" and (loc == "mine3" or loc.startswith("deep")) and not self.portal(loc, nx, ny):
@@ -1615,6 +1623,17 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         if self.is_outdoor(to) and to != frm and self.is_outdoor(frm):
             self.say(p, "~ %s ~" % self.place_name(to).replace("the ", "The ", 1), "event")
         self._run("arrive", p, frm, now)
+
+    def act_rest(self, p, msg, now):
+        """The browser lets you stop anywhere inside a tile: remember where, so everyone else sees you standing just there."""
+        try:
+            ox, oy = float(msg.get("ox", 0)), float(msg.get("oy", 0))
+        except (TypeError, ValueError):
+            return
+        if not (math.isfinite(ox) and math.isfinite(oy)):     # "nan" or "inf" would turn into invalid JSON for everyone
+            return
+        p["off"] = [round(max(-0.6, min(0.6, ox)), 2), round(max(-0.6, min(0.6, oy)), 2)]
+        self.dirty = True
 
     def act_face(self, p, msg, now):
         """Turn without stepping (used by click-to-act)."""
