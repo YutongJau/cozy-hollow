@@ -264,7 +264,7 @@ class Crafting:
             n += 1
         self.rested[key] = now + rest
         self.give(p, what, n)
-        self.act_anim(p, "axe" if what == "wood" else "scythe", pos)
+        self.swing_anim(p, "axe" if what == "wood" else "scythe", pos)
         self.fx(p, "lift", what, pos)
         p["xp"] += 2
         self.bump(p, "gathered", n)

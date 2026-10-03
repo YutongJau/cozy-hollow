@@ -104,7 +104,7 @@ class Skies:
         snap["mystery"] = dict(name=self.mystery["name"], kind=self.mystery["kind"], rev=self.mystery["rev"]) if self.mystery else None
 
     def act_wish(self, p, msg, now):
-        if not self.star or int(msg.get("id", 0)) != self.star["id"]:
+        if not self.star or msg.get("id") not in (self.star["id"], str(self.star["id"])):
             return self.say(p, "Too late - it's gone. Watch the sky...")
         wished = self.star.setdefault("wished", [])
         if p["name"] in wished:

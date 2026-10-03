@@ -471,6 +471,39 @@ def neighbors8(pos):
                 yield (x + dx, y + dy)
 
 
+NUM_FIELDS = {"dx", "dy", "n", "i", "score", "amount", "qty", "x", "y"}
+FLAG_FIELDS = {"ok", "yes"}
+
+
+def clean_msg(msg):
+    """Make a client's message safe to act on, whoever sent it: number fields become ints (or go away if they aren't
+    numbers), flags become booleans, ids stay plain ints or strings, and every other field must be a short string."""
+    out = {}
+    if not isinstance(msg, dict):
+        return out
+    for k, v in msg.items():
+        if not isinstance(k, str):
+            continue
+        if k in NUM_FIELDS:
+            if isinstance(v, bool):
+                v = int(v)
+            if isinstance(v, str):
+                try:
+                    v = int(v.strip())
+                except ValueError:
+                    continue
+            if isinstance(v, (int, float)) and v == v and abs(v) < 10 ** 9:
+                out[k] = int(v)
+        elif k in FLAG_FIELDS:
+            out[k] = bool(v)
+        elif k in ("id", "a"):
+            if isinstance(v, (int, str)) and not isinstance(v, bool):
+                out[k] = v if isinstance(v, int) else v[:200]
+        elif isinstance(v, str):
+            out[k] = v[:400]
+    return out
+
+
 def level_for(xp):
     """Level from experience: level L needs 60 * L * L xp (the same curve as always), up to level 1000."""
     return min(MAX_LEVEL, int((max(0, xp) / 60.0) ** 0.5))
@@ -1511,6 +1544,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         p = self.players.get(name)
         if p is None:
             return self.out
+        msg = clean_msg(msg)                 # anything off the wire: numbers are numbers, names are strings, or they're dropped
         t = msg.get("t")
         handler = getattr(self, "act_" + str(t), None)
         self._coin_src = str(t)            # the ledger files any coins this action moves under its name
@@ -1655,7 +1689,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
                 self.give(p, "milk", 1)
                 p["xp"] += 8
                 self.bump(p, "milk")
-                self.act_anim(p, "hand", fpos)
+                self.swing_anim(p, "hand", fpos)
                 self.dirty = True
                 return self.say(p, "Milked %s. She seems pleased." % cow["name"], "good")
             return self.say(p, "%s: Moo. (milk in %s)" % (cow["name"], fmt_duration(MILK_EVERY - cow.get("milk", 0))))
@@ -1684,7 +1718,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
                 if self.terrain(*t) == "d" and not any(tl.get(k) for k in ("soil", "sprinkler", "tree", "forage")):
                     self.tile(t)["soil"] = True
                     self.bump(p, "tilled")
-                    self.act_anim(p, "hoe", t)
+                    self.swing_anim(p, "hoe", t)
                     return self.say(p, "Tilled the soil. Hold seeds and press E to plant.")
             if any(self.terrain(*t) == "." for t in targets):
                 return self.say(p, "That's not farmland. Till the sandy fields by the house and along the path.")
@@ -1693,7 +1727,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
             for t in targets:
                 tl = self.tiles.get(t, {})
                 if tl.get("soil"):
-                    self.act_anim(p, "watering_can", t)
+                    self.swing_anim(p, "watering_can", t)
                     return self.water(p, tl, now)
             return self.say(p, "Nothing to water here." + (" Refill at the pond or the well." if p["water"] <= 0 else ""))
         if sel == "scythe":
@@ -1701,7 +1735,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
                 tl = self.tiles.get(t, {})
                 crop = tl.get("crop")
                 if crop:
-                    self.act_anim(p, "scythe", t)
+                    self.swing_anim(p, "scythe", t)
                     if crop["progress"] >= CROPS[crop["kind"]]["grow"]:
                         return self.harvest(p, t, tl, now)
                     name = CROPS[crop["kind"]]["name"]
@@ -1717,7 +1751,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
                 tl = self.tiles.get(t)
                 if not tl:
                     continue
-                self.act_anim(p, "pickaxe", t)
+                self.swing_anim(p, "pickaxe", t)
                 if tl.get("sprinkler"):
                     del tl["sprinkler"]
                     self.give(p, "sprinkler", 1)
@@ -1954,7 +1988,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
     def mine(self, p, loc, pos, tl, now):
         kind = tl["ore"]
         del self.atiles[loc][pos]
-        self.act_anim(p, "pickaxe", pos)
+        self.swing_anim(p, "pickaxe", pos)
         got = [(kind, 1)]
         if kind != "stone" and random.random() < 0.5:
             got.append(("stone", 1))
@@ -2041,7 +2075,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         self.dirty = True
         self.say(p, "Set the chest down here.")
 
-    def act_anim(self, p, tool, target, item=None):
+    def swing_anim(self, p, tool, target, item=None):
         """Tell everyone a tool was swung (clients animate it)."""
         self.out.append(("all", dict(t="swing", who=p["name"], tool=tool, x=target[0], y=target[1], item=item)))
 
@@ -2055,7 +2089,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         self.prune(pos)
         self.give(p, "wood", n)
         p["xp"] += 4
-        self.act_anim(p, "axe", pos)
+        self.swing_anim(p, "axe", pos)
         self.say(p, "Chopped down the %s tree. +%d wood." % (tr["name"], n), "warn")
 
     def act_clear(self, p, msg, now):
@@ -2073,7 +2107,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
             return self.say(p, "Nothing to clear here.")
         if tile.get("tree") and TREES[tile["tree"]["kind"]].get("rare"):
             return self.say(p, "You can't bring yourself to dig up the %s." % TREES[tile["tree"]["kind"]]["name"], "warn")
-        self.act_anim(p, "pickaxe", pos)
+        self.swing_anim(p, "pickaxe", pos)
         if tile.get("forage"):
             return self.pick_forage(p, pos, tile, now)
         if tile.get("crop"):
@@ -2180,7 +2214,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
     def harvest(self, p, pos, tile, now):
         crop = tile["crop"]
         c = CROPS[crop["kind"]]
-        self.act_anim(p, "hand", pos)
+        self.swing_anim(p, "hand", pos)
         self.fx(p, "lift", crop["kind"], pos)
         lo, hi = c["yield_"]
         n = random.randint(lo, hi)

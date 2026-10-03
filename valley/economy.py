@@ -216,7 +216,7 @@ class Economy:
                 n += 1
         if not n:
             return self.say(p, "Nothing to till there." if any(self.terrain(*t) == "d" for t in area) else "That's not farmland. Till the sandy fields by the house and along the path.")
-        self.act_anim(p, "hoe", area[0])
+        self.swing_anim(p, "hoe", area[0])
         self.dirty = True
         return self.say(p, "Tilled %d tile%s in one swing." % (n, "s" if n > 1 else ""))
 
@@ -233,7 +233,7 @@ class Economy:
             if p["water"] <= 0:
                 return self.say(p, "Your can is empty! Face the pond or the well and press E to refill.", "warn")
             return self.say(p, "Nothing dry to water there.")
-        self.act_anim(p, "watering_can", area[0])
+        self.swing_anim(p, "watering_can", area[0])
         self.dirty = True
         return self.say(p, "Watered %d tile%s. (%d water left)" % (n, "s" if n > 1 else "", p["water"]))
 

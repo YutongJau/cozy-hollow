@@ -37,18 +37,18 @@ class Landscape:
             if ch in ".d":
                 self.tiles.pop((fx, fy), None)
                 self.set_terrain("farm", fx, fy, "~")
-                self.act_anim(p, "hoe", (fx, fy))
+                self.swing_anim(p, "hoe", (fx, fy))
                 self.bump(p, "landscaped")
                 return self.say(p, "Dug out a little water. (E on water with the shovel fills it back in.)", "good") or True
             if ch == "~":
                 self.set_terrain("farm", fx, fy, ".")
-                self.act_anim(p, "hoe", (fx, fy))
+                self.swing_anim(p, "hoe", (fx, fy))
                 self.bump(p, "landscaped")
                 return self.say(p, "Filled it in with good earth.", "good") or True
             if ch in ":H":
                 self.set_terrain("farm", fx, fy, "." if ch == ":" else "~")
                 self.give(p, "path_stone" if ch == ":" else "bridge_kit", 1)
-                self.act_anim(p, "hoe", (fx, fy))
+                self.swing_anim(p, "hoe", (fx, fy))
                 return self.say(p, "Lifted the %s." % ("path stones" if ch == ":" else "bridge planks"), "good") or True
             return self.say(p, "The shovel works on grass, water, paths and bridges.") or True
         if sel == "path_stone":

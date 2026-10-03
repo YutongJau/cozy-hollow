@@ -179,7 +179,7 @@ class Museum:
         for pos in ((fx, fy), (p["x"], p["y"])):
             if pos in bl and sel == "bug_net":
                 b = bl.pop(pos)
-                self.act_anim(p, "scythe", pos)
+                self.swing_anim(p, "scythe", pos)
                 self.dirty = True
                 chance = 0.8 + (0.15 if self.has_buff(p, "luck", now) else 0)
                 if random.random() < chance:
@@ -203,7 +203,7 @@ class Museum:
                 key = random.choices(kinds, weights)[0]
                 n = 2 if key in ("clay", "stone") else 1
                 self.give(p, key, n)
-                self.act_anim(p, "hoe", pos)
+                self.swing_anim(p, "hoe", pos)
                 self.fx(p, "lift", key, pos)
                 p["xp"] += 10
                 self.bump(p, "dug")

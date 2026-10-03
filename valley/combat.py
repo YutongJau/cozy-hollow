@@ -358,7 +358,7 @@ class Combat:
             return self.tame(p, loc, m, now) or True
         if m and it.get("kind") == "weapon":
             dmg = it["dmg"] + (8 if self.has_buff(p, "strength", now) else 0)
-            self.act_anim(p, "sword", (m["x"], m["y"]))
+            self.swing_anim(p, "sword", (m["x"], m["y"]))
             self.damage_mob(p, loc, m, dmg, now)
             return True
         if m:
