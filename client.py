@@ -56,6 +56,13 @@ CREATURES = {
     "slime": ("\u2299", "s", 76, "green"), "blue_slime": ("\u2299", "s", 45, "cyan"), "bat": ("\u028c", "^", 135, "magenta"),
     "rock_crab": ("\u0436", "x", 167, "red"), "ghost": ("\u03a9", "G", 252, "white"), "slime_king": ("\u25c9", "O", 46, "green"),
     "rabbit": ("r", "r", 180, "yellow"), "quail": ("q", "q", 137, "yellow"), "deer": ("\u00a5", "Y", 173, "yellow"), "boar": ("\u00df", "b", 95, "red"),
+    # the rare pets (valley/pets.py)
+    "otter": ("\u00f6", "o", 137, "yellow"), "golem": ("\u00a4", "g", 248, "white"), "beaver": ("\u0180", "b", 130, "yellow"),
+    "sprout": ("\u03c8", "s", 120, "green"), "hedgehog": ("\u0448", "h", 137, "yellow"), "glowbug": ("\u0298", "*", 226, "yellow"),
+    "mole": ("\u0271", "m", 97, "magenta"), "slimeling": ("\u0275", "s", 77, "green"), "kingling": ("\u0174", "K", 141, "magenta"),
+    "fox": ("\u0192", "f", 208, "yellow"), "chick": ("\u00ba", "c", 220, "yellow"), "calf": ("\u00e6", "c", 255, "white"),
+    "mouse": ("\u00b5", "m", 250, "white"), "frog": ("\u0444", "f", 71, "green"), "parrot": ("\u00fe", "p", 202, "red"),
+    "starling": ("\u22c6", "*", 228, "yellow"),
 }
 MAP_LAYOUT = {"frontier": (0, 50), "town": (68, 46), "farm": (144, 60), "mountain": (153, 18), "forest": (156, 94), "beach": (74, 94),
               "island": (74, 128), "mine1": (240, 4), "mine2": (240, 33), "mine3": (240, 62)}
@@ -165,7 +172,7 @@ def facing_name(f):
 
 SEASON_ICON = {"spring": "✿", "summer": "☀", "fall": "☘", "winter": "❄"}
 WEATHER_TEXT = {"sun": "Sunny", "rain": "Raining", "snow": "Snowing"}
-HINT = "WASD move  E act  F fish  1-9 hand  I bag  U eat  C craft  J journal  L quests  K book  N map  T chat  ? help  Q quit"
+HINT = "WASD move  E act  F fish  1-9 hand  I bag  U eat  C craft  J journal  L quests  K book  P pets  N map  T chat  ? help  Q quit"
 
 
 def wrap(text, width):
@@ -340,6 +347,11 @@ class Client:
                 self.add_log("\u266a Rowan plays \"%s\" on the fiddle." % str(msg.get("id", "")).replace("_", " "), "good", toast=True)
             elif t == "ouch":
                 self.add_log("Ouch! -%d health" % msg.get("n", 0), "warn", toast=True)
+            elif t == "petdrop" and msg.get("who") == self.name:     # a rare pet found you: a flash to celebrate
+                try:
+                    curses.flash()
+                except curses.error:
+                    pass
             elif t == "minigame":
                 self.start_minigame(msg.get("game"), msg.get("seed", 1))
             elif t == "fish_bite":
@@ -466,6 +478,8 @@ class Client:
             self.send(dict(t="quests"))
         elif key in ("k", "K"):
             self.send(dict(t="book"))
+        elif key in ("p", "P"):
+            self.send(dict(t="pets"))
         elif key in ("n", "N"):
             if self.count_item("valley_map"):
                 self.mode = "map"
@@ -944,7 +958,7 @@ class Client:
                 return "%s - E to chat%s." % (n["n"], (", E again to give your " + W.ITEMS[sel]["name"]) if giftable else "")
         for pt in st.get("pets", []):
             if pt["loc"] == loc and (pt["x"], pt["y"]) == (fx, fy):
-                return "%s the %s - E to pet." % (pt["name"], pt["kind"])
+                return "%s the %s - E to pet." % (pt["name"], str(pt.get("sp") or pt["kind"]).lower())
         if loc == "farm":
             for c in st.get("chickens", []):
                 if (c["x"], c["y"]) == (fx, fy):
@@ -1016,7 +1030,8 @@ class Client:
                 lines.append(("", 0, None))
                 lines.append(("-- %s --" % r["section"], curses.A_BOLD | self.pal.pair("yellow"), None))
                 continue
-            icon = self.item_glyph(r["key"]) if r.get("key") in W.ITEMS else (self.g(NPC_GLYPH) if r.get("npc") else self.g(("\u266a", "~")) if r.get("song") else " ")
+            icon = self.item_glyph(r["key"]) if r.get("key") in W.ITEMS else (self.g(NPC_GLYPH) if r.get("npc") else self.g(("\u266a", "~")) if r.get("song") else
+                                                                         ("?" if r.get("shadow") else self.g(CREATURES.get(r["pet"], ("?", "?"))[:2])) if r.get("pet") else " ")
             right = str(r.get("right") or "")
             label = "%s %s" % (icon, r.get("label", ""))
             room = bw - 8 - len(right)
@@ -2368,6 +2383,7 @@ class Client:
         ("N", "the valley map: every place and where everyone is. Father TongTong (by the chapel) gives you one."),
         ("L", "your quest log. ! over a villager: a favor or a story for you; ? : you have what they asked for."),
         ("K", "the Valley Book: the Valley Revival everyone works on together (five stages, six threads), and more."),
+        ("P", "your pets. Rare ones turn up all by themselves, once in a long while, as you fish, mine, forage, harvest, cook and adventure."),
         ("Upgrades", "Ingrid upgrades your hoe and can (a row, then a square); Oakley builds farm expansions, a kitchen and cellar, a "
                      "bigger coop and barn, and sells furniture once the valley is Bustling. /ledger shows the farm's books."),
         ("Levels", "new seeds, saplings, recipes and deeper mine floors open as you level. Fruit trees grow only in the "

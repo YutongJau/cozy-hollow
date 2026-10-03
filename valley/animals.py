@@ -2,6 +2,7 @@
 import random
 
 import world as W
+from valley import pets as PT
 
 COOP = dict(kind="coop", label="COOP", x=4, y=18, w=6, h=4, to="coop")
 YARD = dict(x0=11, y0=18, x1=21, y1=23)          # inside the chicken-yard fence
@@ -138,7 +139,7 @@ class Animals:
     def _snap_animals(self, snap, now):
         snap["chickens"] = [dict(id=c["id"], name=c["name"], x=c["x"], y=c["y"], f=c.get("facing", 1), c=c.get("color", "white"),
                                  egg=c.get("egg", 0) >= EGG_EVERY) for c in self.chickens]
-        snap["pets"] = [dict(owner=p["name"], kind=p["pet"]["kind"], name=p["pet"]["name"], loc=p["pet"].get("loc", "farm"),
+        snap["pets"] = [dict(owner=p["name"], kind=p["pet"]["kind"], sp=PT.species(p["pet"]["kind"]), name=p["pet"]["name"], loc=p["pet"].get("loc", "farm"),
                              x=p["pet"].get("x", p["x"]), y=p["pet"].get("y", p["y"]), f=p["pet"].get("f", [0, 1]))
                         for p in self.players.values() if p.get("pet") and p.get("online")]
 
@@ -156,16 +157,24 @@ class Animals:
         if pet and pet.get("loc") != p.get("loc", "farm"):     # the pet waits wherever you logged in
             self._arrive_animals(p, None, now)
 
-    def _arrive_animals(self, p, frm, now):
+    def place_pet(self, p):
+        """The pet lands beside you (behind you if there's room), never on your own tile where you'd hide it."""
         pet = p.get("pet")
-        if pet:
-            # the pet lands beside you (behind you if there's room), never on your own tile where you'd hide it
-            loc, fx, fy = p.get("loc", "farm"), p["facing"][0], p["facing"][1]
-            spots = [(p["x"] - fx, p["y"] - fy), (p["x"] + fy, p["y"] + fx), (p["x"] - fy, p["y"] - fx), (p["x"] + fx, p["y"] + fy),
-                     (p["x"] - 1, p["y"] - 1), (p["x"] + 1, p["y"] - 1), (p["x"] - 1, p["y"] + 1), (p["x"] + 1, p["y"] + 1)]
-            spot = next((s for s in spots if self.walkable(s[0], s[1], loc) and not self.portal(loc, s[0], s[1])), (p["x"], p["y"]))
-            pet["loc"], pet["x"], pet["y"] = loc, spot[0], spot[1]
-            p["trail"] = []
+        if not pet:
+            return
+        loc, fx, fy = p.get("loc", "farm"), p["facing"][0], p["facing"][1]
+        spots = [(p["x"] - fx, p["y"] - fy), (p["x"] + fy, p["y"] + fx), (p["x"] - fy, p["y"] - fx), (p["x"] + fx, p["y"] + fy),
+                 (p["x"] - 1, p["y"] - 1), (p["x"] + 1, p["y"] - 1), (p["x"] - 1, p["y"] + 1), (p["x"] + 1, p["y"] + 1)]
+        spot = next((s for s in spots if self.walkable(s[0], s[1], loc) and not self.portal(loc, s[0], s[1])), (p["x"], p["y"]))
+        pet["loc"], pet["x"], pet["y"] = loc, spot[0], spot[1]
+        pet["f"] = [max(-1, min(1, p["x"] - spot[0])), max(-1, min(1, p["y"] - spot[1]))]
+        if pet["f"][0] and pet["f"][1]:
+            pet["f"][1] = 0
+        p["trail"] = []
+
+    def _arrive_animals(self, p, frm, now):
+        if p.get("pet"):
+            self.place_pet(p)
         if p.get("riding") and (p.get("loc", "farm") in W.INTERIORS or p.get("loc", "").startswith(("mine", "deep"))):
             p["riding"] = False
             self.say(p, "You tie up your horse outside.")
@@ -210,8 +219,7 @@ class Animals:
             p["bubble"] = ["<3", now + 2]
             self.dirty = True
             mine = owner is p
-            noise = "wags happily" if pet["kind"] == "dog" else "purrs and headbutts your hand"
-            return self.say(p, "%s %s.%s" % (pet["name"], noise, "" if mine else " (%s's %s)" % (owner["name"], pet["kind"])), "good") or True
+            return self.say(p, "%s %s.%s" % (pet["name"], PT.noise(pet["kind"]), "" if mine else " (%s's %s)" % (owner["name"], PT.species(pet["kind"]).lower())), "good") or True
         if loc == "farm":
             c = self.chicken_at(fx, fy)
             if c:
@@ -255,12 +263,18 @@ class Animals:
         self.event("%s bought a chicken! %s is pecking around the yard." % (p["name"], name), now, "good")
 
     def adopt(self, p, kind, now):
-        if p.get("pet"):
-            return self.say(p, "%s would be jealous!" % p["pet"]["name"])
+        owned = p.setdefault("pets", {})
+        if kind in owned:
+            return self.say(p, "%s would be jealous!" % self.pet_entry(p, kind)["name"])
         name = random.choice(PET_NAMES[kind])
-        p["pet"] = dict(kind=kind, name=name, loc=p.get("loc", "farm"), x=p["x"], y=p["y"] + 1, f=[0, 1], love=0)
+        owned[kind] = dict(name=name, love=0, got=now, how="adopted")
+        follows = not p.get("pet")
+        if follows:
+            self.pet_follow_me(p, kind)
         self.dirty = True
         self.event("%s adopted a %s named %s! (rename it with /petname)" % (p["name"], kind, name), now, "good")
+        if not follows:
+            self.say(p, "%s is settling in at home. Press P to call your pets." % name)
 
     def buy_horse(self, p, color, now):
         if p.get("horse"):

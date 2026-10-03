@@ -572,13 +572,13 @@ def catalog():
 # World
 # --------------------------------------------------------------------------
 # the feature modules: each registers its items when imported and adds a mixin to World
-from valley import crafting, animals, villagers, museum, festivals, skies, combat, landscape, townhall, progress, quests, revival, bloom, finale, economy, fairground, pantry, chapters   # noqa: E402
-HOOKS = ["craft", "animals", "folk", "museum", "fest", "sky", "combat", "land", "town", "progress", "quests", "revival", "bloom", "finale", "economy", "fair", "collect", "chapters"]
+from valley import crafting, animals, villagers, museum, festivals, skies, combat, landscape, townhall, progress, quests, revival, bloom, finale, economy, fairground, pantry, chapters, pets   # noqa: E402
+HOOKS = ["craft", "animals", "folk", "museum", "fest", "sky", "combat", "land", "town", "progress", "quests", "revival", "bloom", "finale", "economy", "fair", "collect", "chapters", "pets"]
 MAX_HP = 100
 
 
 class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Museum, festivals.Festivals, skies.Skies,
-            combat.Combat, landscape.Landscape, townhall.TownHall, progress.Progress, quests.Quests, revival.Revival, bloom.Bloom, finale.Finale, economy.Economy, fairground.Fairground, pantry.Collections, chapters.Chapters):
+            combat.Combat, landscape.Landscape, townhall.TownHall, progress.Progress, quests.Quests, revival.Revival, bloom.Bloom, finale.Finale, economy.Economy, fairground.Fairground, pantry.Collections, chapters.Chapters, pets.Pets):
     def _run(self, phase, *args):
         """Call every feature module's hook for this phase (init, load, save, tick, fast, snap, join, leave, pub, priv)."""
         for n in HOOKS:
@@ -1066,6 +1066,7 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         if p is not None:
             ps = p.setdefault("stats", {})
             ps[key] = ps.get(key, 0) + n
+            self.pet_roll(p, key)          # every time you do the thing, a tiny chance a pet decides to follow you
         self.dirty = True
 
     def check_milestones(self, now):
@@ -1866,8 +1867,8 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         if loc == "museum":
             return self.museum_menu(p, now)
         if loc == "clinic":
-            rows = [dict(key="adopt_dog", label="Adopt a dog", info="A loyal friend who follows you everywhere.", act=dict(t="adopt", kind="dog"), ok=not p.get("pet"), right="Adopt"),
-                    dict(key="adopt_cat", label="Adopt a cat", info="An independent friend who follows you anyway.", act=dict(t="adopt", kind="cat"), ok=not p.get("pet"), right="Adopt"),
+            rows = [dict(key="adopt_dog", label="Adopt a dog", info="A loyal friend who follows you everywhere.", act=dict(t="adopt", kind="dog"), ok="dog" not in p.get("pets", {}), right="Adopt"),
+                    dict(key="adopt_cat", label="Adopt a cat", info="An independent friend who follows you anyway.", act=dict(t="adopt", kind="cat"), ok="cat" not in p.get("pets", {}), right="Adopt"),
                     dict(label="A check-up", info="Back to full health for 50g.", act=dict(t="heal"), ok=p.get("hp", MAX_HP) < self.max_hp(p) and self.coins >= 50, right="50g")]
             return self.list_menu(p, "clinic", "Doc Alder's Clinic", rows, sub="\"Strays turn up here all the time. Want to give one a home?\"")
         if loc == "smith":
@@ -2533,15 +2534,18 @@ class World(crafting.Crafting, animals.Animals, villagers.Villagers, museum.Muse
         if cmd == "/petname":
             name = "".join(ch for ch in " ".join(parts[1:]) if ch.isalnum() or ch in " -'")[:16].strip()
             if not p.get("pet") or not name:
-                return self.say(p, "Usage: /petname <name> (adopt a pet at the clinic first)")
+                return self.say(p, "Usage: /petname <name> (renames the pet following you - adopt one at the clinic, or press P to call one)")
             p["pet"]["name"] = name
+            p.setdefault("pets", {}).setdefault(p["pet"]["kind"], {})["name"] = name
             self.dirty = True
-            return self.say(p, "Your %s is called %s now." % (p["pet"]["kind"], name), "good")
+            return self.say(p, "Your %s is called %s now." % (pets.species(p["pet"]["kind"]).lower(), name), "good")
+        if cmd == "/pets":
+            return self.pets_menu(p, now)
         if cmd in ("/ledger", "/economy"):
             return self.ledger_menu(p, now)
         if cmd == "/me":
             action = " ".join(parts[1:])
             return self.event("* %s %s" % (p["name"], action), now, "chat")
         if cmd == "/help":
-            return self.say(p, "Commands: /ping@all [msg], /look boy|girl, /hat on|off, /color <shirt>, /farm <name>, /give <player> <item> [n], /me <action>, /petname <name>, /ledger")
+            return self.say(p, "Commands: /ping@all [msg], /look boy|girl, /hat on|off, /color <shirt>, /farm <name>, /give <player> <item> [n], /me <action>, /pets, /petname <name>, /ledger")
         self.say(p, "Unknown command %s. Try /help." % cmd, "warn")

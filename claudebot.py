@@ -90,6 +90,10 @@ DECIDE = {
 COOL_LINES = ["Nice day for it.", "Just vibin' and farmin'.", "The crops look good today.", "Love this valley, honestly.",
               "Gonna catch something big today, I can feel it.", "Anyone else hungry? Juniper's bread smells amazing."]
 GREETS = ["Hey {n}, what's up?", "Yo {n}! Good to see you.", "{n}! Perfect timing.", "Sup {n}."]
+PET_LINES = ["No way... %s the %s just started following me. Best day on the farm.",       # a rare pet found me
+             "Okay, %s the %s is my new best friend. Don't tell the cows.",
+             "Look who tagged along - %s the %s! Super rare, apparently.",
+             "Uh, guys? %s the %s won't stop following me. I'm keeping it."]
 
 
 class Abort(Exception):
@@ -331,6 +335,11 @@ class ClaudeBot:
             if m.get("style") in ("event", "good", "ping") and not text.startswith(NAME + " "):
                 self.events.append(text)
             self.said.append(text)
+        elif t == "petdrop" and m.get("who") == NAME and time.time() - self.last_say > 2:   # a rare pet found me: say so, like anyone would
+            line = random.choice(PET_LINES) % (m.get("name") or "a little friend", (m.get("sp") or "pet").lower())
+            self.send(dict(t="chat", text=line))
+            self.last_say = time.time()
+            self.log("say: %s" % line)
         elif t == "fish_bite":
             self.fish_bite = m
         elif t == "open" and m.get("menu") == "shop":

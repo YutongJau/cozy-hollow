@@ -94,10 +94,11 @@ this account, with the command to join. Add a message if you like:
 | **1-9**, Tab | choose a tool or item from your tool bar; **I** opens your whole bag. Hold seeds and they go up over your head, ready to plant. |
 | **T** | chat (speech bubbles!). `/` starts a command. |
 | **J** | the farm journal: shared stats, milestones, farmers |
+| **P** | your pets: call one to follow you, or send it home |
 | **H** or **?** | help |
 | shift-**Q** | leave; the farm keeps growing |
 
-Chat commands: `/ping@all [msg]`, `/look boy|girl`, `/hat on|off`, `/color <shirt>`, `/farm <new name>`, `/give <player> <item> [n]`, `/me <action>`.
+Chat commands: `/ping@all [msg]`, `/look boy|girl`, `/hat on|off`, `/color <shirt>`, `/farm <new name>`, `/give <player> <item> [n]`, `/me <action>`, `/pets`, `/petname <name>`.
 
 The map uses full colour backgrounds when your terminal supports 256
 colours (almost all do): green grass that turns golden in fall and white in
@@ -199,6 +200,15 @@ browser tabs reload by themselves.
   for health and a little buff. The tailoring table sews hats.
 * **Animals**: chickens (once the coop is built) lay eggs; adopt a dog or a
   cat at the clinic; buy a horse in Dusty Gulch and press R to ride.
+* **Rare pets**, the RuneScape way: every activity has a pet of its own that
+  turns up, once in a long while, all by itself. An otter pup while you fish,
+  a pebble golem in the mines, a beaver kit chopping wood, a sproutling in the
+  crop rows, a hedgehog, a glowbug, a mole, a slimeling, the Lil' Slime King,
+  a fox kit, a golden chick, a calf, a kitchen mouse in a chef's hat, a frog,
+  a parrot and a star sprite: sixteen in all, from about 1 in 20 (wishes) to 1
+  in 3,000 (watering). Your odds get up to twice as good by level 100. The
+  whole farm hears when someone finds one. P shows them all: who follows
+  you, who waits at home, and the mysteries still out there.
 * **The museum** collects bugs (catch them with a net), fish, fossils and
   artifacts (dig up wriggling spots with the hoe) and paintings from the
   travelling art dealer, who sometimes sells forgeries.
@@ -285,7 +295,8 @@ To play across two machines instead of one, run
 * `areas.py` — the town, forest, beach, mountain, mine, island and frontier maps, buildings and people
 * `valley/` — the living valley: villagers, festivals, animals, crafting, the museum, combat, the skies, landscaping, town projects,
   levels and quests (`progress`, `quests`), the Valley Revival (`revival`, `bloom`, `finale`), the economy (`economy`), festival
-  activities (`fairground`), bundles, collections and achievements (`pantry`), yearly chapters and the scrapbook (`chapters`)
+  activities (`fairground`), bundles, collections and achievements (`pantry`), yearly chapters and the scrapbook (`chapters`),
+  rare pets (`pets`)
 * `tests/` — `python3 tests/test_<name>.py` checks each system against a real World, no server needed
 * `claudebot.py` — Claude, the AI farmer who plays as a regular player
 * `tools/` — render any sprite to a PNG without a browser (`node tools/render.js out.png 4 "petSprite('cat','down',0)"`)

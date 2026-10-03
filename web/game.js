@@ -93,6 +93,7 @@ function sfx(kind) {
   else if (kind === "water") { note(220, 0, .1, "sine", .06); note(180, .05, .12, "sine", .05); }
   else if (kind === "pop") { note(330, 0, .07, "triangle", .06); }
   else if (kind === "ping") { note(660, 0, .15); note(880, .15, .15); note(660, .3, .25); }
+  else if (kind === "pet") { note(659, 0, .12); note(784, .1, .12); note(988, .2, .12); note(1319, .32, .35); }
   else if (kind === "fail") { note(300, 0, .15, "sawtooth", .04); note(220, .12, .25, "sawtooth", .04); }
   else if (kind === "step") { const f = { grass: 140, snow: 120, wood: 210, stone: 260, path: 170, sand: 130, soil: 120, rug: 180 }[arguments[1]] || 160; note(f * (0.9 + Math.random() * 0.2), 0, .05, "sine", .018); }
   else if (kind === "dig") { note(110, 0, .09, "sine", .06); note(90, .04, .1, "triangle", .04); }
@@ -279,6 +280,15 @@ function handle(m) {
   else if (m.t === "shot") { if (m.loc === curLoc()) shots.push({ x0: m.x0, y0: m.y0, x1: m.x1, y1: m.y1, kind: m.kind, t0: performance.now() }); sfx("pop"); }
   else if (m.t === "poof" || m.t === "pop") { if (m.loc === curLoc()) poofs.push({ x: m.x, y: m.t === "pop" ? m.y - 1.5 : m.y, t0: performance.now(), big: m.kind === "slime_king", pop: m.t === "pop" }); if (m.t === "pop") sfx("coin"); }
   else if (m.t === "ouch") { hurtAt = performance.now(); sfx("fail"); }
+  else if (m.t === "petdrop") {   // a rare pet turned up: sparkles and hearts where it appeared, and a little fanfare for the lucky farmer
+    if (m.loc === curLoc()) {
+      const x = m.x + 0.5, y = m.y + 0.6;
+      spawn({ kind: "ring", x, y, loc: m.loc, layer: "ground", col: "rgba(255,240,160,.95)", life: 900, r: 0.9 });
+      burst(14, { kind: "star", x, y, loc: m.loc, col: ["#fff2a0", "#ffffff", "#ffd84a", "#ffb0d0"], life: 1200, size: 1.4, g: 2 }, { up: 3, speed: 1.4, r: 0.6 });
+      for (let i = 0; i < 3; i++) spawn({ kind: "heart", x: x + (i - 1) * 0.35, y: y - 0.4, z: 0.5, vz: 1.6 + i * 0.3, g: 1.2, loc: m.loc, col: "#ff6b9d", life: 1300 });
+    }
+    if (m.who === prefs.name) sfx("pet");
+  }
   else if (m.t === "minigame") startMinigame(m.game, m.seed);
   else if (m.t === "song") playSong(m.song);
   else if (m.t === "fish_bite") { startFishing(m); if (my.ready) { const [dx, dy] = DELTA[my.dir], bx = my.tx + dx + 0.5, by = my.ty + dy + 0.5; spawn({ kind: "ring", x: bx, y: by, loc: curLoc(), layer: "ground", col: "rgba(230,248,255,.95)", life: 700, r: 0.6 }); burst(6, { x: bx, y: by, loc: curLoc(), col: ["#bfeaff", "#ffffff"], life: 500, size: 1.2, g: 10 }, { up: 2.4, speed: 1 }); } }
@@ -741,7 +751,7 @@ function renderMenu(fresh) {
     body.innerHTML = "<p><kbd>WASD</kbd> or arrows to walk. You act on the tile you stand on; the pond, shop, bin, board, well, mailbox and trees are used by facing them (they glow).</p>" +
       "<p><kbd>E</kbd> or <kbd>Space</kbd> does the natural thing: till grass, plant the seed in hand, water, harvest, pick forage, refill the can at the pond or well, open the shop / bin / board.</p>" +
       "<p><kbd>F</kbd> fishes when facing the pond: keep the fish inside your net with <kbd>&larr;</kbd> <kbd>&rarr;</kbd> or the mouse.</p>" +
-      "<p><kbd>X</kbd> clears the tile you stand on, or picks up the storage chest you face (carry it and press <kbd>E</kbd> to set it down). <kbd>1</kbd>-<kbd>9</kbd> pick what you hold, <kbd>I</kbd> opens the bag, <kbd>J</kbd> the journal, <kbd>L</kbd> your quest log, <kbd>K</kbd> the Valley Book, <kbd>N</kbd> the valley map (Father TongTong gives you one), <kbd>T</kbd> chats, <kbd>M</kbd> music (and the songs Rowan teaches you), <kbd>+</kbd>/<kbd>-</kbd> zoom, <kbd>G</kbd> smooth or crisp graphics. Hold <kbd>Shift</kbd> while you walk to run. You can walk in any direction (two keys at once for diagonals). Click anywhere to walk there; click something (a crop, a villager, a door, a field while you hold the hoe) to walk over and use it.</p>" +
+      "<p><kbd>X</kbd> clears the tile you stand on, or picks up the storage chest you face (carry it and press <kbd>E</kbd> to set it down). <kbd>1</kbd>-<kbd>9</kbd> pick what you hold, <kbd>I</kbd> opens the bag, <kbd>J</kbd> the journal, <kbd>L</kbd> your quest log, <kbd>K</kbd> the Valley Book, <kbd>P</kbd> your pets (rare ones turn up all by themselves, once in a long while, as you fish, mine, forage, harvest, cook and adventure), <kbd>N</kbd> the valley map (Father TongTong gives you one), <kbd>T</kbd> chats, <kbd>M</kbd> music (and the songs Rowan teaches you), <kbd>+</kbd>/<kbd>-</kbd> zoom, <kbd>G</kbd> smooth or crisp graphics. Hold <kbd>Shift</kbd> while you walk to run. You can walk in any direction (two keys at once for diagonals). Click anywhere to walk there; click something (a crop, a villager, a door, a field while you hold the hoe) to walk over and use it.</p>" +
       "<p>Explore the valley: walk off the farm's paths west to <b>Hollow Town</b> (shops, saloon, museum, folks to talk to), north to <b>Summit Ridge</b> and its <b>mine</b> (break ore and gems with the pickaxe, ladders go deeper), south to the <b>Whisperwood</b>. From town go south to <b>Driftwood Beach</b>, where a boat at the pier sails to <b>Palm Isle</b>; the stagecoach in town rides to <b>Dusty Gulch</b>. Fish in rivers, lakes and the sea, and forage what each place grows.</p>" +
       "<p><b>Folks and festivals.</b> Villagers walk to work, the shops and home on the clock. Face one and press <kbd>E</kbd> to chat; press it again holding something to give it as a gift (everyone has favourites). On festival days the town square fills up: talk to Mayor Hazel for the line dance, the rodeo, the livestock fair, Fallfest, the fishing derby or the winter feast. The <b>Town Hall</b> takes donations for projects that grow the town and bring new neighbours.</p>" +
       "<p><b>Quests and levels.</b> A <b>!</b> over a villager means they have a favor to ask or a story to share; a <b>?</b> means you have what they asked for. <kbd>L</kbd> shows your quest log and what your next level unlocks. Levels open new seeds, saplings, recipes and deeper mine floors, and fruit trees grow only in the marked tree spots in the orchard meadow south of the fields - more spots open as you level.</p>" +
@@ -847,6 +857,7 @@ window.addEventListener("keydown", (e) => {
   else if (e.key === "n" || e.key === "N") openMap();
   else if (e.key === "l" || e.key === "L") send({ t: "quests" });
   else if (e.key === "k" || e.key === "K") send({ t: "book" });
+  else if (e.key === "p" || e.key === "P") send({ t: "pets" });
   else if (e.key === "r" || e.key === "R") send({ t: "ride" });
   else if (e.key === "c" || e.key === "C") send({ t: "craft_open" });
   else if (e.key === "v" || e.key === "V") wish();
@@ -1949,12 +1960,17 @@ function drawSide(spr, x, y, f, ox, oy, size, yoff, xoff) {
   if (f < 0) { ctx.save(); ctx.translate(sx + size, sy); ctx.scale(-1, 1); ctx.drawImage(spr, 0, 0, size, size); ctx.restore(); }
   else ctx.drawImage(spr, sx, sy, size, size);
 }
+function petCoat(kind, name) {   // every dog and cat its own coat, picked from its name
+  const coats = (Art.PET_COATS || {})[kind] || [""]; let h = 0; for (const ch of name || "") h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return coats[h % coats.length];
+}
+const FLOATY_PETS = new Set(["glowbug", "starling"]);   // these hover and flutter even standing still
 function drawPet(pt, v, ox, oy, now) {
-  const f = pt.f || [0, 1], facing = facingName(f), fr = v.moving ? 1 + Math.floor(now / 120) % 3 : 0;
+  const f = pt.f || [0, 1], facing = facingName(f), floaty = FLOATY_PETS.has(pt.kind);
+  const fr = floaty ? Math.floor(now / 150) % 4 : v.moving ? 1 + Math.floor(now / 120) % 3 : 0;
   const sx = Math.round(ox + v.x * T), sy = Math.round(oy + v.y * T);
-  ctx.fillStyle = "rgba(0,0,0,.18)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, sy + T - 3 * SCALE, 10 * SCALE, 3 * SCALE, 0, 0, 6.3); ctx.fill();
-  const coats = (Art.PET_COATS || {})[pt.kind] || [""]; let h = 0; for (const ch of pt.name || "") h = (h * 31 + ch.charCodeAt(0)) >>> 0;   // every pet its own coat
-  ctx.drawImage(Art.petSprite(pt.kind, facing, fr, coats[h % coats.length]), sx, sy + (facing === "left" || facing === "right" ? 3 : 2) * SCALE, T, T);
+  ctx.fillStyle = "rgba(0,0,0,.18)"; ctx.beginPath(); ctx.ellipse(sx + T / 2, sy + T - 3 * SCALE, (floaty ? 6 : 10) * SCALE, (floaty ? 2 : 3) * SCALE, 0, 0, 6.3); ctx.fill();
+  ctx.drawImage(Art.petSprite(pt.kind, facing, fr, petCoat(pt.kind, pt.name)), sx, sy + (facing === "left" || facing === "right" ? 3 : 2) * SCALE, T, T);
 }
 function drawMob(kind, v, ox, oy, now, hp, tame, hurt) {
   const big = kind === "slime_king", size = big ? 48 * SCALE : T, flying = kind === "bat" || kind === "ghost";
@@ -2537,6 +2553,7 @@ function renderList(d, h2, body, foot) {
     else if (r.hat) ic = hatIcon(r.hat);
     else if (r.npc) ic = npcIcon(r.npc);
     else if (r.horse) ic = sprIcon(Art.horseSprite(r.horse, "right", 0));
+    else if (r.pet) ic = sprIcon(r.shadow && Art.petShadow ? Art.petShadow(r.pet) : Art.petSprite(r.pet, "down", 0, petCoat(r.pet, r.petname)));
     else if (r.swatch) { ic = el("div", "sw"); ic.style.background = COLORS[r.swatch]; }
     else if (r.song) { ic = el("div", "sw", "♪"); ic.style.cssText = "background:#2a3a6a;color:#ffe066;text-align:center;line-height:28px;font-size:18px"; }
     else ic = el("div", "sw"), ic.style.border = "0";
@@ -2686,7 +2703,7 @@ function aheadExtra(loc, fx, fy) {
     if (mark === "?") return name + " - E to hand over what they asked for!";
     if (mark === "!") return name + " has something to ask you - E to talk.";
     return name + (giftable ? " - E to chat, E again to give your " + catalog.items[hold].name + "." : " - E to talk."); } }
-  for (const pt of state.pets || []) if (pt.loc === loc && pt.x === fx && pt.y === fy) return pt.name + " the " + pt.kind + " - E to pet.";
+  for (const pt of state.pets || []) if (pt.loc === loc && pt.x === fx && pt.y === fy) return pt.name + " the " + (pt.sp || pt.kind).toLowerCase() + " - E to pet.";
   if (loc === "farm") for (const c of state.chickens || []) if (c.x === fx && c.y === fy) return c.name + " the chicken - " + (c.egg ? "E to collect an egg!" : "no egg yet.");
   const spot = loc === "farm" ? spotLevel(fx, fy) : null;
   if (spot != null && !(tiles[fx + "," + fy] || {}).t) return me && me.level >= spot ? "A tree spot - hold a sapling and press E to plant." : "A tree spot - it opens at level " + spot + ".";
